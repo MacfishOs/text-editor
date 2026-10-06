@@ -1,0 +1,23 @@
+<!-- SPDX-FileCopyrightText: 2026 Reion Wong <reionwong@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
+<RCC>
+    <qresource prefix="/qml">
+        <file alias="Main.qml">qml/Main.qml</file>
+        <file alias="EditorPage.qml">qml/EditorPage.qml</file>
+        <file alias="EditorSettings.qml">qml/EditorSettings.qml</file>
+        <file alias="EditorTabBar.qml">qml/EditorTabBar.qml</file>
+        <file alias="FindBar.qml">qml/FindBar.qml</file>
+        <file alias="GoToLineBar.qml">qml/GoToLineBar.qml</file>
+        <file alias="InfoBar.qml">qml/InfoBar.qml</file>
+        <file alias="StatusBar.qml">qml/StatusBar.qml</file>
+        <file alias="MainMenu.qml">qml/MainMenu.qml</file>
+        <file alias="SaveChangesDialog.qml">qml/SaveChangesDialog.qml</file>
+        <file alias="PreferencesDialog.qml">qml/PreferencesDialog.qml</file>
+        <file alias="ShortcutsDialog.qml">qml/ShortcutsDialog.qml</file>
+        <file alias="InfoRow.qml">qml/InfoRow.qml</file>
+        <file alias="ListCard.qml">qml/ListCard.qml</file>
+        <file alias="SectionLabel.qml">qml/SectionLabel.qml</file>
+        <file alias="Separator.qml">qml/Separator.qml</file>
+    </qresource>
+</RCC>
