@@ -224,6 +224,7 @@ private:
     int displayColumns(const QString &text) const;
     qreal wrapWidth() const;
     qreal textLeft() const;
+    qreal toPixel(qreal value) const;
     LineCache *ensureLayout(int line);
     void buildLayout(int line, LineCache *cache, LineCache *previous = nullptr);
     void setLineVisualCount(int line, int count);

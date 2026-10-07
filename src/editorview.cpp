@@ -357,6 +357,13 @@ qreal EditorView::gutterWidth() const
     return qCeil(width * m_dpr) / m_dpr;
 }
 
+// Rounds half up with some slack: lines' positions come from different sums and,
+// scrolled to a half pixel, land a hair either side of it, one line up and the next down.
+qreal EditorView::toPixel(qreal value) const
+{
+    return qFloor(value * m_dpr + 0.5 + 1e-4) / m_dpr;
+}
+
 qreal EditorView::textLeft() const
 {
     return m_lineNumbers ? gutterWidth() : qRound(m_sidePadding * m_dpr) / m_dpr;
@@ -1132,9 +1139,9 @@ QSGNode *EditorView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         n->setRect(r);
         n->setColor(color);
     };
+    // Edges, not sizes, so that rects meeting at a fractional pixel stay joined.
     auto snapped = [this](const QRectF &r) {
-        return QRectF(qRound(r.x() * m_dpr) / m_dpr, qRound(r.y() * m_dpr) / m_dpr,
-                      qRound(r.width() * m_dpr) / m_dpr, qRound(r.height() * m_dpr) / m_dpr);
+        return QRectF(QPointF(toPixel(r.left()), toPixel(r.top())), QPointF(toPixel(r.right()), toPixel(r.bottom())));
     };
 
     if (!m_currentLineRect.isNull())
@@ -1180,7 +1187,7 @@ QSGNode *EditorView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
                 node->lines[key] = {textNode, segment.version};
             }
             QMatrix4x4 matrix;
-            matrix.translate(textX, qRound((top - m_contentY) * m_dpr) / m_dpr);
+            matrix.translate(textX, toPixel(top - m_contentY));
             textNode->setMatrix(matrix);
         }
     }
@@ -1225,7 +1232,7 @@ QSGNode *EditorView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
             }
             const qreal width = layout->second->lineAt(0).naturalTextWidth();
             QMatrix4x4 matrix;
-            matrix.translate(qRound((right - width) * m_dpr) / m_dpr, qRound((planned.top - m_contentY) * m_dpr) / m_dpr);
+            matrix.translate(qRound((right - width) * m_dpr) / m_dpr, toPixel(planned.top - m_contentY));
             numberNode->setMatrix(matrix);
         }
     }

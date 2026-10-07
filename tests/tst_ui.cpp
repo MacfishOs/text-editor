@@ -52,6 +52,7 @@ private slots:
 
     void opensFileAndTypes();
     void clickSelection();
+    void selectionHasNoSeams();
     void scrollBarDrag();
     void openKeepsMaximized();
     void tabsAndSession();
@@ -211,6 +212,39 @@ void UiTest::clickSelection()
     QCOMPARE(document->selectedText(), QStringLiteral("beta"));
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, beta);
     QCOMPARE(document->selectedText(), QStringLiteral("alpha beta gamma\n"));
+}
+
+void UiTest::selectionHasNoSeams()
+{
+    QByteArray data;
+    for (int i = 0; i < 200; ++i)
+        data += "line " + QByteArray::number(i) + "\n";
+    QQuickWindow *window = start({writeFile(QStringLiteral("seams.txt"), data)});
+    QVERIFY(window);
+    EditorView *view = editor(window);
+    QVERIFY(view->document()->waitForLoaded());
+    QTRY_VERIFY(view->contentHeight() > 150 * view->lineHeight());
+    view->document()->selectAll();
+    // Selecting all brings the cursor at the end into view first.
+    QTRY_VERIFY(view->contentY() > 100 * view->lineHeight());
+
+    // Scrolled to half a device pixel, where rounding each line on its own split them.
+    const qreal ratio = window->effectiveDevicePixelRatio();
+    const qreal target = 40 * view->lineHeight() + 0.5 / ratio;
+    view->setContentY(target);
+    QTest::qWait(50);
+    QCOMPARE(view->contentY(), target);
+    const QImage image = window->grabWindow();
+    const int x = qRound(view->mapToScene(QPointF(view->width() / 2, 0)).x() * ratio);
+    const QColor selection = image.pixelColor(x, qRound(view->mapToScene(QPointF(0, view->height() / 2)).y() * ratio));
+    const int top = qCeil(view->mapToScene(QPointF(0, 0)).y() * ratio) + 1;
+    const int bottom = qFloor(view->mapToScene(QPointF(0, view->height())).y() * ratio) - 1;
+    QStringList seams;
+    for (int y = top; y < bottom; ++y) {
+        if (image.pixelColor(x, y) != selection)
+            seams += QString::number(y);
+    }
+    QVERIFY2(seams.isEmpty(), qPrintable(seams.join(QLatin1Char(' '))));
 }
 
 void UiTest::scrollBarDrag()
