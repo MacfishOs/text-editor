@@ -23,6 +23,9 @@ FishUI.FloatingCard {
     visible: false
     implicitWidth: 300
     implicitHeight: 32 + padding * 2
+    // Concentric with the fields inside; too small a card for continuous corners.
+    radius: FishUI.Theme.smallRadius + padding
+    continuousCorners: false
 
     function open() {
         visible = true
