@@ -369,10 +369,11 @@ FishUI.Window {
             id: _tabBar
             view: _tabView
             anchors.left: parent.left
-            anchors.right: _newTabButton.left
+            anchors.right: _menuButton.left
             // The terminal's inset.
             anchors.leftMargin: FishUI.Units.smallSpacing
-            anchors.rightMargin: 4
+            // Past the new tab button, a stretch of title bar stays free to move the window by.
+            anchors.rightMargin: 4 + _newTabButton.width + 40
             anchors.verticalCenter: parent.verticalCenter
 
             onCloseRequested: (index) => root.closeTab(index)
@@ -420,7 +421,8 @@ FishUI.Window {
         FishUI.HeaderButton {
             id: _newTabButton
             objectName: "newTabButton"
-            anchors.right: _menuButton.left
+            // Follows the last tab.
+            x: _tabBar.x + _tabBar.trackWidth + 4
             anchors.verticalCenter: parent.verticalCenter
             size: 32
             artwork: "add"

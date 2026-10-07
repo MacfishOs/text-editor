@@ -62,6 +62,8 @@ Item {
     readonly property bool sliding: dragIndex >= 0 || incoming || _settle.running
     // How far above or below the bar a dragged tab comes off it.
     readonly property real detachDistance: 16
+    // How far the track reaches as drawn, eased with the tabs.
+    readonly property real trackWidth: Math.min(width, _track.width)
 
     signal closeRequested(int index)
     signal closeOthersRequested(int index)
@@ -171,6 +173,7 @@ Item {
         interactive: contentWidth > width && control.dragIndex < 0
 
         FishUI.RoundedRectangle {
+            id: _track
             width: _flick.contentWidth
             height: _flick.height
             radius: height / 2
