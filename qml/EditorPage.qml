@@ -22,14 +22,6 @@ FocusScope {
     readonly property alias editor: _editor
     readonly property string title: document.title
     readonly property bool modified: document.modified
-    readonly property string subtitle: {
-        let parts = []
-        if (document.folder.length > 0)
-            parts.push(document.folder)
-        if (!document.writable && !document.untitled)
-            parts.push(qsTr("Read-Only"))
-        return parts.join(" — ")
-    }
     // Chosen by the user, so kept in the session.
     property string chosenEncoding: ""
     property string chosenLanguage: ""

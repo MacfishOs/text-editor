@@ -296,7 +296,8 @@ Item {
                     }
 
                     onPositionChanged: (mouse) => {
-                        if (!(pressedButtons & Qt.LeftButton) || detached)
+                        // A lone tab has nowhere to go; the title bar moves the window instead.
+                        if (!(pressedButtons & Qt.LeftButton) || detached || control.count < 2)
                             return
 
                         const x = mapToItem(_flick.contentItem, mouse.x, mouse.y).x

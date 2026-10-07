@@ -21,7 +21,7 @@ FishUI.Window {
     windowButtonsTopMargin: 0
     windowButtonsRightMargin: 4
     blurEnabled: false
-    background.color: FishUI.Theme.backgroundColor
+    background.color: Themes.background(Prefs.colorScheme, FishUI.Theme.darkMode)
     background.opacity: 1
 
     // Tabs to open with, from a restored session: maps as sessionTabs() makes them.
@@ -365,42 +365,8 @@ FishUI.Window {
     headerItem: Item {
         id: _header
 
-        readonly property real reservedWidth: root.width - width + _newTabButton.width + _menuButton.width
-
-        Column {
-            visible: !_tabBar.visible
-            width: Math.min(Math.max(_titleLabel.implicitWidth, _subtitleLabel.implicitWidth),
-                            root.width - _header.reservedWidth * 2 - 80)
-            x: (root.width - width) / 2
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 0
-
-            FishUI.Label {
-                id: _titleLabel
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: root.currentPage ? root.currentPage.title + (root.currentPage.modified ? " •" : "") : ""
-                elide: Text.ElideMiddle
-                font.pixelSize: 13
-                font.weight: Font.Medium
-                color: root.active ? FishUI.Theme.textColor : FishUI.Theme.disabledTextColor
-            }
-
-            FishUI.Label {
-                id: _subtitleLabel
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                visible: text.length > 0
-                text: root.currentPage ? root.currentPage.subtitle : ""
-                elide: Text.ElideMiddle
-                font.pixelSize: 11
-                color: FishUI.Theme.disabledTextColor
-            }
-        }
-
         EditorTabBar {
             id: _tabBar
-            visible: _tabView.count > 1 || incoming || root.detaching
             view: _tabView
             anchors.left: parent.left
             anchors.right: _newTabButton.left
