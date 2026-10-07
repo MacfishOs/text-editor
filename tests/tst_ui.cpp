@@ -51,6 +51,7 @@ private slots:
     void cleanup();
 
     void opensFileAndTypes();
+    void clickSelection();
     void tabsAndSession();
     void findBarAndStatus();
     void findCardKeepsMatchVisible();
@@ -187,6 +188,27 @@ void UiTest::opensFileAndTypes()
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, text);
     QCOMPARE(document->cursor().line, 1);
     grab(window, QStringLiteral("file"));
+}
+
+void UiTest::clickSelection()
+{
+    const QString path = writeFile(QStringLiteral("words.txt"), "alpha beta gamma\nsecond line\n");
+    QQuickWindow *window = start({path});
+    QVERIFY(window);
+    EditorView *view = editor(window);
+    QVERIFY(view);
+    Document *document = view->document();
+    QVERIFY(document->waitForLoaded());
+    QTRY_VERIFY(view->contentHeight() > 2 * view->lineHeight());
+
+    const qreal advance = QFontMetricsF(view->font()).horizontalAdvance(QLatin1Char('a'));
+    const QPoint beta = view->mapToScene(QPointF(view->gutterWidth() + advance * 8, 6 + view->lineHeight() * 0.5)).toPoint();
+
+    // A double click selects the word, a third click the line.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, beta);
+    QCOMPARE(document->selectedText(), QStringLiteral("beta"));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, beta);
+    QCOMPARE(document->selectedText(), QStringLiteral("alpha beta gamma\n"));
 }
 
 void UiTest::tabsAndSession()

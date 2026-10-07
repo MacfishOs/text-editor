@@ -243,6 +243,7 @@ private:
     void moveCursor(const TextPosition &position, bool select, bool keepPreferredX = false);
     TextPosition moveVertically(const TextPosition &from, int lines);
     TextPosition visualLineEdge(const TextPosition &from, bool end);
+    TextRange unitAt(const TextPosition &position) const;
     void selectByUnit(const TextPosition &position);
     void startAutoScroll();
     void updatePrimarySelection();

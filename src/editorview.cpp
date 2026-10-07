@@ -1807,6 +1807,15 @@ QVariant EditorView::inputMethodQuery(Qt::InputMethodQuery query) const
     }
 }
 
+TextRange EditorView::unitAt(const TextPosition &position) const
+{
+    if (m_selectUnit == 1)
+        return m_document->wordAt(position);
+    const int last = m_document->lineCount() - 1;
+    return position.line < last ? TextRange{{position.line, 0}, {position.line + 1, 0}}
+                                : TextRange{{position.line, 0}, m_document->buffer().end()};
+}
+
 void EditorView::selectByUnit(const TextPosition &position)
 {
     if (!m_document)
@@ -1815,14 +1824,7 @@ void EditorView::selectByUnit(const TextPosition &position)
         m_document->setCursor(position, m_document->anchor());
         return;
     }
-    TextRange unit;
-    if (m_selectUnit == 1) {
-        unit = m_document->wordAt(position);
-    } else {
-        const int last = m_document->lineCount() - 1;
-        unit = position.line < last ? TextRange{{position.line, 0}, {position.line + 1, 0}}
-                                    : TextRange{{position.line, 0}, m_document->buffer().end()};
-    }
+    const TextRange unit = unitAt(position);
     if (unit.start < m_unitAnchor.start)
         m_document->setCursor(unit.start, m_unitAnchor.end);
     else
@@ -1879,9 +1881,7 @@ void EditorView::mousePressEvent(QMouseEvent *event)
 
     if (inGutter) {
         m_selectUnit = 2;
-        const int last = m_document->lineCount() - 1;
-        m_unitAnchor = hit.line < last ? TextRange{{hit.line, 0}, {hit.line + 1, 0}}
-                                       : TextRange{{hit.line, 0}, m_document->buffer().end()};
+        m_unitAnchor = unitAt(hit);
         if (shift && !selection.isEmpty())
             m_unitAnchor = {selection.start, selection.start};
         selectByUnit(hit);
@@ -1896,9 +1896,8 @@ void EditorView::mousePressEvent(QMouseEvent *event)
         m_selecting = true;
     } else {
         m_selectUnit = m_clickCount == 2 ? 1 : 2;
+        m_unitAnchor = unitAt(hit);
         selectByUnit(hit);
-        const TextRange now = m_document->selection();
-        m_unitAnchor = now;
         m_selecting = true;
     }
     event->accept();
@@ -1906,8 +1905,8 @@ void EditorView::mousePressEvent(QMouseEvent *event)
 
 void EditorView::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    // Counted in mousePressEvent, which also sees triple clicks.
-    mousePressEvent(event);
+    // The second press already reached mousePressEvent, which counts clicks itself.
+    event->accept();
 }
 
 void EditorView::mouseMoveEvent(QMouseEvent *event)
