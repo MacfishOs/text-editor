@@ -52,6 +52,8 @@ private slots:
 
     void opensFileAndTypes();
     void clickSelection();
+    void scrollBarDrag();
+    void openKeepsMaximized();
     void tabsAndSession();
     void findBarAndStatus();
     void findCardKeepsMatchVisible();
@@ -209,6 +211,43 @@ void UiTest::clickSelection()
     QCOMPARE(document->selectedText(), QStringLiteral("beta"));
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, beta);
     QCOMPARE(document->selectedText(), QStringLiteral("alpha beta gamma\n"));
+}
+
+void UiTest::scrollBarDrag()
+{
+    QByteArray data;
+    for (int i = 0; i < 500; ++i)
+        data += "line\n";
+    const QString path = writeFile(QStringLiteral("long.txt"), data);
+    QQuickWindow *window = start({path});
+    QVERIFY(window);
+    EditorView *view = editor(window);
+    QVERIFY(view);
+    QVERIFY(view->document()->waitForLoaded());
+    QTRY_VERIFY(view->contentHeight() > 400 * view->lineHeight());
+    QCOMPARE(view->contentY(), 0.0);
+
+    // The handle sits at the top of the right edge; dragging it scrolls the text.
+    QQuickItem *flick = view->parentItem();
+    const QPoint handle = flick->mapToScene(QPointF(flick->width() - 4, 10)).toPoint();
+    const QPoint lower = flick->mapToScene(QPointF(flick->width() - 4, flick->height() / 2)).toPoint();
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, handle);
+    QTest::mouseMove(window, handle + QPoint(0, 10));
+    QTest::mouseMove(window, lower);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, lower);
+    QTRY_VERIFY(view->contentY() > 100 * view->lineHeight());
+}
+
+void UiTest::openKeepsMaximized()
+{
+    QQuickWindow *window = start({writeFile(QStringLiteral("first.txt"), "first\n")});
+    QVERIFY(window);
+    window->showMaximized();
+    QTRY_COMPARE(window->windowStates(), Qt::WindowMaximized);
+
+    m_app->openPaths({writeFile(QStringLiteral("second.txt"), "second\n")}, 0, window);
+    QTRY_COMPARE(window->property("tabCount").toInt(), 2);
+    QCOMPARE(window->windowStates(), Qt::WindowMaximized);
 }
 
 void UiTest::tabsAndSession()

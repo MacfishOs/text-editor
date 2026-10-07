@@ -197,10 +197,13 @@ FocusScope {
                     target: _flick
                 }
 
+                // Above the view, which is also a child of the Flickable and would take their presses.
                 ScrollBar.vertical: FishUI.ScrollBar {
+                    z: 1
                     darkMode: page.darkSurface
                 }
                 ScrollBar.horizontal: FishUI.ScrollBar {
+                    z: 1
                     darkMode: page.darkSurface
                     policy: Prefs.wordWrap ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
                 }

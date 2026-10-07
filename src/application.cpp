@@ -24,6 +24,17 @@
 
 static constexpr int closedTabLimit = 20;
 
+// QWindow::show() is showNormal(), which would take a maximized window out of its state.
+static void present(QQuickWindow *window)
+{
+    if (!window->isVisible())
+        window->setVisible(true);
+    else if (window->windowStates() & Qt::WindowMinimized)
+        window->setWindowStates(window->windowStates() & ~Qt::WindowMinimized);
+    window->raise();
+    window->requestActivate();
+}
+
 Application::Application(QQmlEngine *engine, QObject *parent)
     : QObject(parent)
     , m_engine(engine)
@@ -216,11 +227,8 @@ void Application::openPaths(const QStringList &paths, int line, QQuickWindow *pr
                                   Q_ARG(QVariant, line));
         window = target;
     }
-    if (window) {
-        window->show();
-        window->raise();
-        window->requestActivate();
-    }
+    if (window)
+        present(window);
 }
 
 void Application::openText(const QString &text)
@@ -229,9 +237,7 @@ void Application::openText(const QString &text)
     if (!window)
         return;
     QMetaObject::invokeMethod(window, "openText", Q_ARG(QVariant, text));
-    window->show();
-    window->raise();
-    window->requestActivate();
+    present(window);
 }
 
 void Application::Open(const QStringList &arguments, const QString &workingDirectory)
@@ -262,11 +268,8 @@ void Application::Open(const QStringList &arguments, const QString &workingDirec
         openPaths(pending, line);
     if (!any) {
         QQuickWindow *window = targetWindow();
-        if (window) {
-            window->show();
-            window->raise();
-            window->requestActivate();
-        }
+        if (window)
+            present(window);
     }
 }
 
