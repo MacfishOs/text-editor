@@ -184,7 +184,8 @@ Rectangle {
 
     FishUI.DesktopMenu {
         id: _encodingMenu
-        pointerGrabEnabled: true
+        // Let the compositor deliver pointer events to the submenu under the cursor.
+        pointerGrabEnabled: false
 
         FishUI.MenuItem {
             text: qsTr("Reopen with Encoding")

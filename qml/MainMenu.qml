@@ -14,7 +14,8 @@ FishUI.DesktopMenu {
     readonly property var page: window ? window.currentPage : null
     readonly property Document document: page ? page.document : null
 
-    pointerGrabEnabled: true
+    // Let the compositor deliver pointer events to the submenu under the cursor.
+    pointerGrabEnabled: false
 
     FishUI.MenuItem {
         text: qsTr("Open…")
