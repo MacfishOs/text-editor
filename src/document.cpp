@@ -383,14 +383,21 @@ void Document::finishLoad(const LoadResult &result)
         return;
     }
 
-    const int oldCount = m_buffer.lineCount();
     const DecodedText &decoded = result.decoded;
-    m_buffer.setLines(decoded.lines);
-    // Views follow the buffer before anything else can make them look at it.
-    m_states.reset(nullptr, m_buffer.lineCount());
-    m_cursor = m_anchor = reloading ? m_buffer.clamp(m_reloadCursor) : TextPosition();
-    emit linesChanged(0, oldCount, m_buffer.lineCount());
-    m_undo.clear();
+    // Reloading the same encoding is one more undo step; another encoding's text
+    // must not come back through undo.
+    if (reloading && !m_locked && !decoded.binary && !decoded.malformed && !m_malformed
+        && decoded.encoding == m_encoding && result.size <= largeFileSize && m_buffer.length() <= largeFileSize) {
+        replaceWithReloaded(decoded.lines);
+    } else {
+        const int oldCount = m_buffer.lineCount();
+        m_buffer.setLines(decoded.lines);
+        // Views follow the buffer before anything else can make them look at it.
+        m_states.reset(nullptr, m_buffer.lineCount());
+        m_cursor = m_anchor = reloading ? m_buffer.clamp(m_reloadCursor) : TextPosition();
+        emit linesChanged(0, oldCount, m_buffer.lineCount());
+        m_undo.clear();
+    }
     m_formatModified = false;
     m_diskDiffers = false;
     m_ignoreDisk = false;
@@ -457,6 +464,32 @@ void Document::finishLoad(const LoadResult &result)
     if (!reloading && s_recentFilesHook)
         s_recentFilesHook(m_filePath);
     emit loaded();
+}
+
+void Document::replaceWithReloaded(const QList<QString> &lines)
+{
+    const QString before = m_buffer.text();
+    const QString after = lines.join(QLatin1Char('\n'));
+    const qsizetype shorter = qMin(before.size(), after.size());
+    qsizetype head = 0;
+    while (head < shorter && before.at(head) == after.at(head))
+        ++head;
+    qsizetype tail = 0;
+    while (tail < shorter - head && before.at(before.size() - 1 - tail) == after.at(after.size() - 1 - tail))
+        ++tail;
+
+    const TextPosition cursor = m_reloadCursor;
+    if (head + tail < before.size() || head + tail < after.size()) {
+        const EditStep step{m_buffer.position(head), before.mid(head, before.size() - head - tail),
+                            after.mid(head, after.size() - head - tail)};
+        m_undo.seal();
+        m_undo.record(step, UndoGroup::Other, {m_cursor, m_anchor}, {cursor, cursor},
+                      QDateTime::currentMSecsSinceEpoch());
+        m_undo.seal();
+        applyStep(step, false);
+    }
+    m_cursor = m_anchor = m_buffer.clamp(cursor);
+    m_undo.setClean();
 }
 
 void Document::applyEditorConfig()
@@ -1561,18 +1594,53 @@ bool Document::write(const QString &path, const QByteArray &encoding, bool bom)
         return false;
     }
 
-    // EditorConfig's whitespace rules change the buffer itself, as one undo step.
+    // EditorConfig's whitespace rules go into the file first and into the buffer,
+    // as one undo step, only once it is written.
     const bool finalNewline = m_finalNewline.value_or(newFile);
     const bool needsNewline = finalNewline && !m_buffer.line(m_buffer.lineCount() - 1).isEmpty()
             && !isEmpty();
-    if ((m_trimTrailingWhitespace || needsNewline) && !m_locked) {
+    const bool reformat = (m_trimTrailingWhitespace || needsNewline) && !m_locked;
+    QList<QString> lines = m_buffer.lines();
+    if (reformat) {
+        if (m_trimTrailingWhitespace) {
+            for (QString &text : lines) {
+                int end = int(text.size());
+                while (end > 0 && (text.at(end - 1) == QLatin1Char(' ') || text.at(end - 1) == QLatin1Char('\t')))
+                    --end;
+                text.truncate(end);
+            }
+        }
+        if (needsNewline)
+            lines.append(QString());
+    }
+
+    bool lossy = false;
+    const QByteArray bytes = TextCodec::encode(lines, encoding, bom, m_lineEnding, &lossy);
+    if (lossy) {
+        setNotice(LossyEncoding, QString::fromLatin1(encoding));
+        return false;
+    }
+
+    // Through a symbolic link to the file it points at, keeping the link, also
+    // when that file does not exist yet.
+    QString target = path;
+    for (int hops = 0; hops < 40 && QFileInfo(target).isSymLink(); ++hops) {
+        const QFileInfo link(target);
+        target = link.exists() ? link.canonicalFilePath() : link.symLinkTarget();
+    }
+
+    QString error;
+    if (!writeFile(target, bytes, &error)) {
+        setNotice(error.isEmpty() ? ReadOnly : SaveFailed, error);
+        return false;
+    }
+
+    if (reformat) {
         beginEdit();
         if (m_trimTrailingWhitespace) {
             for (int line = 0; line < m_buffer.lineCount(); ++line) {
                 const QString &text = m_buffer.line(line);
-                int end = int(text.size());
-                while (end > 0 && (text.at(end - 1) == QLatin1Char(' ') || text.at(end - 1) == QLatin1Char('\t')))
-                    --end;
+                const int end = int(lines.at(line).size());
                 if (end < text.size()) {
                     const TextPosition cursor = m_cursor.line == line ? TextPosition{line, qMin(m_cursor.column, end)}
                                                                       : m_cursor;
@@ -1583,25 +1651,6 @@ bool Document::write(const QString &path, const QByteArray &encoding, bool bom)
         if (needsNewline)
             replace({m_buffer.end(), m_buffer.end()}, QStringLiteral("\n"), UndoGroup::Other, {m_cursor, m_anchor});
         endEdit();
-    }
-
-    bool lossy = false;
-    const QByteArray bytes = TextCodec::encode(m_buffer.lines(), encoding, bom, m_lineEnding, &lossy);
-    if (lossy) {
-        setNotice(LossyEncoding, QString::fromLatin1(encoding));
-        return false;
-    }
-
-    // Through a symbolic link to the file it points at, keeping the link.
-    QString target = path;
-    const QFileInfo info(path);
-    if (info.isSymLink() && info.exists())
-        target = info.canonicalFilePath();
-
-    QString error;
-    if (!writeFile(target, bytes, &error)) {
-        setNotice(error.isEmpty() ? ReadOnly : SaveFailed, error);
-        return false;
     }
 
     const QFileInfo written(target);

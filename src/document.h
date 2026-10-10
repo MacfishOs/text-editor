@@ -315,6 +315,7 @@ signals:
 private:
     void applyStep(const EditStep &step, bool reverse);
     void finishLoad(const LoadResult &result);
+    void replaceWithReloaded(const QList<QString> &lines);
     void setNotice(Notice notice, const QString &detail = QString());
     void updateModified();
     void setFilePath(const QString &path);

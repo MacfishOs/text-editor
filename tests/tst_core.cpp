@@ -47,7 +47,9 @@ private slots:
     void loadAndSave();
     void saveKeepsLineEndingsAndBom();
     void saveThroughSymlinkKeepsPermissions();
+    void saveThroughDanglingSymlink();
     void externalChangeReloadsUnmodified();
+    void externalChangeReloadIsUndoable();
     void externalChangeWhileModified();
     void externalDelete();
     void reopenWithEncoding();
@@ -56,6 +58,7 @@ private slots:
     void saveRefusesLosingMalformedBytes();
     void saveInReadOnlyFolder();
     void saveUnwritableFileKeepsText();
+    void failedSaveLeavesWhitespace();
     void deletedFileKeepsDraft();
     void draftWritesAreOrdered();
     void corruptSessionKeepsDrafts();
@@ -460,6 +463,20 @@ void CoreTest::saveThroughSymlinkKeepsPermissions()
     QCOMPARE(file.readAll(), QByteArray("echo hi!\n"));
 }
 
+void CoreTest::saveThroughDanglingSymlink()
+{
+    const QString target = m_dir.filePath(QStringLiteral("not-yet.txt"));
+    const QString link = m_dir.filePath(QStringLiteral("dangling.txt"));
+    QVERIFY(QFile::link(target, link));
+    Document document;
+    document.setText(QStringLiteral("made"));
+    QVERIFY(document.saveAs(link));
+    QVERIFY(QFileInfo(link).isSymLink());
+    QFile file(target);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), QByteArray("made\n"));
+}
+
 void CoreTest::externalChangeReloadsUnmodified()
 {
     const QString path = writeFile(QStringLiteral("watched.txt"), "first\nsecond\n");
@@ -473,6 +490,31 @@ void CoreTest::externalChangeReloadsUnmodified()
     QVERIFY(!document.isModified());
     QCOMPARE(document.cursor(), (TextPosition{1, 3}));
     QCOMPARE(document.notice(), int(Document::NoNotice));
+}
+
+void CoreTest::externalChangeReloadIsUndoable()
+{
+    const QString path = writeFile(QStringLiteral("history.txt"), "first\nsecond\n");
+    Document document;
+    document.load(path);
+    QVERIFY(document.waitForLoaded());
+    document.setCursor({0, 5});
+    document.insertText(QStringLiteral("!"));
+    QVERIFY(document.save());
+    QTest::qWait(1100);
+    writeFile(QStringLiteral("history.txt"), "first!\nchanged\n");
+    QTRY_COMPARE_WITH_TIMEOUT(document.buffer().line(1), QStringLiteral("changed"), 5000);
+    QVERIFY(!document.isModified());
+
+    document.undo();
+    QCOMPARE(document.buffer().line(1), QStringLiteral("second"));
+    QVERIFY(document.isModified());
+    document.undo();
+    QCOMPARE(document.buffer().line(0), QStringLiteral("first"));
+    document.redo();
+    document.redo();
+    QCOMPARE(document.buffer().line(1), QStringLiteral("changed"));
+    QVERIFY(!document.isModified());
 }
 
 void CoreTest::externalChangeWhileModified()
@@ -641,6 +683,24 @@ void CoreTest::saveUnwritableFileKeepsText()
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), QByteArray("keep\n"));
+}
+
+void CoreTest::failedSaveLeavesWhitespace()
+{
+    writeFile(QStringLiteral("trim/.editorconfig"), "[*]\ntrim_trailing_whitespace = true\n");
+    const QString path = writeFile(QStringLiteral("trim/locked.txt"), "keep\n");
+    QFile::setPermissions(path, QFileDevice::ReadOwner);
+    Document document;
+    document.load(path);
+    QVERIFY(document.waitForLoaded());
+    document.setCursor({0, 4});
+    document.insertText(QStringLiteral("  "));
+    QVERIFY(!document.save());
+    QCOMPARE(document.buffer().line(0), QStringLiteral("keep  "));
+    document.undo();
+    QCOMPARE(document.buffer().line(0), QStringLiteral("keep"));
+    QVERIFY(!document.isModified());
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 }
 
 void CoreTest::deletedFileKeepsDraft()
