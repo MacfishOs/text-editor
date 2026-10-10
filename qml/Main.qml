@@ -271,7 +271,7 @@ FishUI.Window {
 
     // Saving -------------------------------------------------------------------
 
-    // Saves `page`, through Save As when it has no file; `done(saved)` follows.
+    // Saves `page`, through Save As when it has no file; `done(saved, cancelled)` follows.
     function savePage(page, done) {
         if (page.document.untitled || !page.document.writable && !App.fileExists(page.document.filePath)) {
             saveAs(page, done)
@@ -302,10 +302,11 @@ FishUI.Window {
 
     function saveAll() {
         const dirty = pages().filter(page => page.document.modified)
+        // A failed save shows its notice on its page; only a cancelled dialog stops the rest.
         const next = () => {
             const page = dirty.shift()
             if (page)
-                savePage(page, saved => { if (saved) next() })
+                savePage(page, (saved, cancelled) => { if (!cancelled) next() })
         }
         next()
     }
@@ -331,21 +332,24 @@ FishUI.Window {
         property var done: null
         title: qsTr("Save As")
         fileMode: FileDialog.SaveFile
+        // `done` may open this dialog again for the next page, so it runs last.
         onAccepted: {
             const path = App.urlToPath(selectedFile)
             const saved = page && page.document.saveAs(path)
             if (saved)
                 Prefs.lastFolder = path.substring(0, path.lastIndexOf("/"))
-            if (done)
-                done(saved)
+            const finished = done
             page = null
             done = null
+            if (finished)
+                finished(saved)
         }
         onRejected: {
-            if (done)
-                done(false)
+            const finished = done
             page = null
             done = null
+            if (finished)
+                finished(false, true)
         }
     }
 
