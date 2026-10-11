@@ -56,6 +56,7 @@ private slots:
     void scrollBarDrag();
     void openKeepsMaximized();
     void tabsAndSession();
+    void crowdedTabs();
     void findBarAndStatus();
     void findCardKeepsMatchVisible();
     void gutter_data();
@@ -325,6 +326,85 @@ void UiTest::tabsAndSession()
     QVERIFY(m_app->canReopenClosedTab());
     QTest::keyClick(restored, Qt::Key_T, Qt::ControlModifier | Qt::ShiftModifier);
     QCOMPARE(restored->property("tabCount").toInt(), 3);
+}
+
+void UiTest::crowdedTabs()
+{
+    QStringList files;
+    for (int i = 0; i < 12; ++i)
+        files << writeFile(QStringLiteral("crowded-%1.txt").arg(i), "text\n");
+    QQuickWindow *window = start(files);
+    QVERIFY(window);
+    QTRY_COMPARE(window->property("tabCount").toInt(), 12);
+
+    QQuickItem *bar = window->findChild<QQuickItem *>(QStringLiteral("tabBar"));
+    QVERIFY(bar);
+    // The header follows a resize a little later; wait for the bar to.
+    QTRY_VERIFY(bar->width() > 0);
+    const qreal chrome = window->width() - bar->width();
+    const auto resize = [&](int width) {
+        window->resize(width, 480);
+        QTRY_COMPARE(bar->width(), width - chrome);
+    };
+    resize(700);
+    QQuickItem *flick = nullptr;
+    for (QQuickItem *child : bar->findChildren<QQuickItem *>()) {
+        if (child->inherits("QQuickFlickable"))
+            flick = child;
+    }
+    QVERIFY(flick);
+    const auto contentX = [flick] { return flick->property("contentX").toReal(); };
+
+    // Titles keep their room; the bar scrolls instead.
+    const qreal tabWidth = bar->property("tabWidth").toReal();
+    QCOMPARE(tabWidth, bar->property("minimumTabWidth").toReal());
+    const qreal limit = flick->property("contentWidth").toReal() - flick->width();
+    QVERIFY(limit > 0);
+
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 0));
+    QTRY_COMPARE(contentX(), 0.0);
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 11));
+    QTRY_COMPARE(contentX(), limit);
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 0));
+    QTRY_COMPARE(contentX(), 0.0);
+
+    // A dragged tab becomes the current one as soon as it moves.
+    QObject *view = bar->property("view").value<QObject *>();
+    QVERIFY(view);
+    QCOMPARE(view->property("currentIndex").toInt(), 0);
+    const QPoint grab = bar->mapToScene(QPointF(tabWidth * 2.5, bar->height() / 2)).toPoint();
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, grab);
+    for (int dx = 4; dx <= 24; dx += 4)
+        QTest::mouseMove(window, grab + QPoint(dx, 0));
+    QTRY_COMPARE(view->property("currentIndex").toInt(), 2);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, grab + QPoint(24, 0));
+    QTRY_COMPARE(bar->property("dragIndex").toInt(), -1);
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 11));
+    QTRY_COMPARE(contentX(), limit);
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 0));
+    QTRY_COMPARE(contentX(), 0.0);
+
+    // A wheel scrolls the strip, which stays where the wheel left it.
+    const QPointF onBar = bar->mapToScene(QPointF(bar->width() / 2, bar->height() / 2));
+    QWheelEvent wheel(onBar, window->mapToGlobal(onBar), QPoint(), QPoint(0, -120), Qt::NoButton,
+                      Qt::NoModifier, Qt::NoScrollPhase, false);
+    QGuiApplication::sendEvent(window, &wheel);
+    QTRY_VERIFY(contentX() > 0);
+    const qreal scrolled = contentX();
+    QTest::qWait(300);
+    QCOMPARE(contentX(), scrolled);
+
+    // A tab out of view scrolls just into it.
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 11));
+    QTRY_COMPARE(contentX(), limit);
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 1));
+    QTRY_COMPARE(contentX(), tabWidth);
+
+    // A narrower window keeps the current tab whole.
+    QMetaObject::invokeMethod(window, "selectTab", Q_ARG(QVariant, 11));
+    QTRY_COMPARE(contentX(), limit);
+    resize(660);
+    QTRY_COMPARE(contentX(), flick->property("contentWidth").toReal() - flick->width());
 }
 
 void UiTest::findBarAndStatus()

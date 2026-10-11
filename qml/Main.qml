@@ -371,6 +371,7 @@ FishUI.Window {
 
         EditorTabBar {
             id: _tabBar
+            objectName: "tabBar"
             view: _tabView
             anchors.left: parent.left
             anchors.right: _menuButton.left
