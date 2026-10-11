@@ -28,19 +28,20 @@ add_library(editor-core STATIC
     src/undostack.cpp
 )
 target_include_directories(editor-core PUBLIC src)
+# Linked into the application module.
+set_target_properties(editor-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(editor-core PUBLIC Qt6::Core Qt6::Concurrent Qt6::Xml)
 
-add_executable(${PROJECT_NAME}
+cutefish_add_application(${PROJECT_NAME} SOURCES
     src/main.cpp
     src/application.cpp
     src/editorview.cpp
     src/syntaxtheme.cpp
     resources.qrc
 )
-target_compile_definitions(${PROJECT_NAME} PRIVATE TEXT_EDITOR_VERSION="${PROJECT_VERSION}")
-target_link_libraries(${PROJECT_NAME} PRIVATE
+target_compile_definitions(${PROJECT_NAME}-module PRIVATE TEXT_EDITOR_VERSION="${PROJECT_VERSION}")
+target_link_libraries(${PROJECT_NAME}-module PRIVATE
     editor-core
-    Cutefish::Application
     Qt6::Gui
     Qt6::Quick
     Qt6::QuickControls2
@@ -52,7 +53,6 @@ qt6_add_translation(QM_FILES ${TS_FILES})
 add_custom_target(translations DEPENDS ${QM_FILES} SOURCES ${TS_FILES})
 add_dependencies(${PROJECT_NAME} translations)
 
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES cutefish-text-editor.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES ${QM_FILES} DESTINATION ${CMAKE_INSTALL_DATADIR}/cutefish-text-editor/translations)
 

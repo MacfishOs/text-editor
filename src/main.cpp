@@ -36,10 +36,12 @@ static void handleTerminate(int)
     [[maybe_unused]] const ssize_t written = ::write(signalPipe[0], &byte, 1);
 }
 
-int main(int argc, char *argv[])
+int cutefish_application_main(int argc, char *argv[])
 {
-    Cutefish::Application::prepare();
-    QGuiApplication app(argc, argv);
+    Q_UNUSED(argc);
+    Q_UNUSED(argv);
+
+    QGuiApplication &app = *qGuiApp;
     app.setApplicationName(QStringLiteral("cutefish-text-editor"));
     app.setApplicationVersion(QStringLiteral(TEXT_EDITOR_VERSION));
     app.setDesktopFileName(QStringLiteral("cutefish-text-editor"));
