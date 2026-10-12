@@ -20,8 +20,6 @@
 #include <functional>
 #include <memory>
 
-class QFileSystemWatcher;
-
 // The end states of each line's highlighting, computed lazily from the top.
 // After an edit only the changed lines are recomputed when the state they
 // end in is the same as before.
@@ -382,7 +380,8 @@ private:
     QTimer m_draftTimer;
     QFuture<void> m_draftWrite;
 
-    QFileSystemWatcher *m_watcher = nullptr;
+    QString m_watchedFile;
+    QString m_watchedFolder;
     QDateTime m_diskModified;
     qint64 m_diskSize = -1;
     QTimer m_diskCheckTimer;

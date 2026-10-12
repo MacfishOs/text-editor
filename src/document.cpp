@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QMimeDatabase>
+#include <QPointer>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUuid>
@@ -32,6 +33,35 @@ struct LoadResult
 };
 
 static std::function<void(const QString &)> s_recentFilesHook;
+
+// One watcher for every document: each QFileSystemWatcher is an inotify instance, a
+// per-user limited resource, and closing one with watches blocks for a kernel grace period.
+static QPointer<QFileSystemWatcher> s_watcher;
+static QHash<QString, int> s_watchCount;
+
+static QFileSystemWatcher *fileWatcher()
+{
+    if (!s_watcher)
+        s_watcher = new QFileSystemWatcher(QCoreApplication::instance());
+    return s_watcher;
+}
+
+// A file that does not exist yet is counted, and added once it appears.
+static void watchPath(const QString &path)
+{
+    if (s_watchCount[path]++ == 0 && QFileInfo::exists(path))
+        fileWatcher()->addPath(path);
+}
+
+static void unwatchPath(const QString &path)
+{
+    const auto it = s_watchCount.find(path);
+    if (it == s_watchCount.end() || --it.value() > 0)
+        return;
+    s_watchCount.erase(it);
+    if (s_watcher)
+        s_watcher->removePath(path);
+}
 
 void Document::setRecentFilesHook(std::function<void(const QString &)> hook)
 {
@@ -182,6 +212,14 @@ Document::Document(QObject *parent, const QString &draftId)
     m_diskCheckTimer.setInterval(200);
     m_diskCheckTimer.setSingleShot(true);
     connect(&m_diskCheckTimer, &QTimer::timeout, this, &Document::checkDisk);
+    connect(fileWatcher(), &QFileSystemWatcher::fileChanged, this, [this](const QString &path) {
+        if (path == m_watchedFile)
+            m_diskCheckTimer.start();
+    });
+    connect(fileWatcher(), &QFileSystemWatcher::directoryChanged, this, [this](const QString &path) {
+        if (path == m_watchedFolder)
+            m_diskCheckTimer.start();
+    });
 
     m_matchTimer.setInterval(60);
     m_matchTimer.setSingleShot(true);
@@ -201,6 +239,10 @@ Document::Document(QObject *parent, const QString &draftId)
 
 Document::~Document()
 {
+    if (!m_watchedFile.isEmpty())
+        unwatchPath(m_watchedFile);
+    if (!m_watchedFolder.isEmpty())
+        unwatchPath(m_watchedFolder);
     if (m_loadCancel)
         m_loadCancel->store(true);
     m_draftWrite.waitForFinished();
@@ -265,18 +307,26 @@ void Document::setFilePath(const QString &path)
 
 void Document::watchFile()
 {
-    delete m_watcher;
-    m_watcher = nullptr;
-    if (m_filePath.isEmpty())
-        return;
-    m_watcher = new QFileSystemWatcher(this);
     // The folder too: an editor that saves by renaming a new file over the
     // old one leaves a watch on the old file behind.
-    m_watcher->addPath(QFileInfo(m_filePath).absolutePath());
-    if (QFileInfo::exists(m_filePath))
-        m_watcher->addPath(m_filePath);
-    connect(m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_diskCheckTimer.start(); });
-    connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_diskCheckTimer.start(); });
+    const QString folder = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).absolutePath();
+    if (m_watchedFile != m_filePath) {
+        if (!m_watchedFile.isEmpty())
+            unwatchPath(m_watchedFile);
+        m_watchedFile = m_filePath;
+        if (!m_watchedFile.isEmpty())
+            watchPath(m_watchedFile);
+    }
+    if (m_watchedFolder != folder) {
+        if (!m_watchedFolder.isEmpty())
+            unwatchPath(m_watchedFolder);
+        m_watchedFolder = folder;
+        if (!m_watchedFolder.isEmpty())
+            watchPath(m_watchedFolder);
+    }
+    // Replacing or deleting the file drops its watch.
+    if (!m_watchedFile.isEmpty() && QFileInfo::exists(m_watchedFile) && !fileWatcher()->files().contains(m_watchedFile))
+        fileWatcher()->addPath(m_watchedFile);
 }
 
 void Document::updateWritable()
@@ -1461,8 +1511,7 @@ void Document::checkDisk()
     if (m_filePath.isEmpty() || m_loading)
         return;
     const QFileInfo info(m_filePath);
-    if (m_watcher && info.exists() && !m_watcher->files().contains(m_filePath))
-        m_watcher->addPath(m_filePath);
+    watchFile();
     updateWritable();
 
     if (!info.exists()) {

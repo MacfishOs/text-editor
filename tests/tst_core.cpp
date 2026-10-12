@@ -50,6 +50,7 @@ private slots:
     void saveThroughSymlinkKeepsPermissions();
     void saveThroughDanglingSymlink();
     void externalChangeReloadsUnmodified();
+    void externalChangeAfterOtherDocumentCloses();
     void externalChangeReloadIsUndoable();
     void externalChangeWhileModified();
     void externalDelete();
@@ -491,6 +492,23 @@ void CoreTest::externalChangeReloadsUnmodified()
     QVERIFY(!document.isModified());
     QCOMPARE(document.cursor(), (TextPosition{1, 3}));
     QCOMPARE(document.notice(), int(Document::NoNotice));
+}
+
+void CoreTest::externalChangeAfterOtherDocumentCloses()
+{
+    // Documents share one watch per path; the last one open keeps it.
+    const QString path = writeFile(QStringLiteral("shared watch.txt"), "first\n");
+    Document document;
+    document.load(path);
+    QVERIFY(document.waitForLoaded());
+    {
+        Document other;
+        other.load(path);
+        QVERIFY(other.waitForLoaded());
+    }
+    QTest::qWait(1100);
+    writeFile(QStringLiteral("shared watch.txt"), "changed\n");
+    QTRY_COMPARE_WITH_TIMEOUT(document.buffer().line(0), QStringLiteral("changed"), 5000);
 }
 
 void CoreTest::externalChangeReloadIsUndoable()
