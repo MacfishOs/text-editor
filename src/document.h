@@ -140,7 +140,8 @@ public:
     ~Document() override;
 
     // Opens `path`; empty `encoding` detects it.
-    Q_INVOKABLE void load(const QString &path, const QString &encoding = QString());
+    // A tab restored from the session was opened before: it stays where it is in the recent files.
+    Q_INVOKABLE void load(const QString &path, const QString &encoding = QString(), bool addToRecent = true);
     Q_INVOKABLE void reload();
     Q_INVOKABLE void reloadWithEncoding(const QString &encoding);
     Q_INVOKABLE void cancelLoading();
@@ -394,6 +395,7 @@ private:
     QTimer m_progressTimer;
     // A reload keeps the cursor and scroll position.
     bool m_reloading = false;
+    bool m_addToRecent = true;
     TextPosition m_reloadCursor;
 };
 

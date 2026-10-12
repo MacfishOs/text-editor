@@ -11,6 +11,7 @@
 #include "textcodec.h"
 #include "undostack.h"
 
+#include <QSettings>
 #include <QSignalSpy>
 #include <QStringEncoder>
 #include <QTemporaryDir>
@@ -1106,37 +1107,32 @@ void CoreTest::draftRestore()
 
 void CoreTest::recentFiles()
 {
-    const QString store = m_dir.filePath(QStringLiteral("recently-used.xbel"));
-    writeFile(QStringLiteral("recently-used.xbel"),
-              "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-              "<xbel version=\"1.0\" xmlns:bookmark=\"http://www.freedesktop.org/standards/desktop-bookmarks\" "
-              "xmlns:mime=\"http://www.freedesktop.org/standards/shared-mime-info\">\n"
-              "<bookmark href=\"file:///other/app.png\" added=\"2026-01-01T00:00:00Z\" modified=\"2026-01-01T00:00:00Z\">"
-              "<info><metadata owner=\"http://freedesktop.org\"><mime:mime-type type=\"image/png\"/>"
-              "<bookmark:applications><bookmark:application name=\"viewer\" exec=\"viewer %u\" "
-              "modified=\"2026-01-01T00:00:00Z\" count=\"1\"/></bookmark:applications></metadata></info></bookmark>\n"
-              "</xbel>\n");
+    const QString store = m_dir.filePath(QStringLiteral("text-editor.conf"));
     const QString a = writeFile(QStringLiteral("recent a.txt"), "a");
     const QString b = writeFile(QStringLiteral("recent-b.txt"), "b");
+    const QString gone = m_dir.filePath(QStringLiteral("recent-deleted.txt"));
+    {
+        QSettings settings(store, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("Editor/wordWrap"), false);
+        settings.setValue(QStringLiteral("Recent/Files"), QStringList{gone});
+    }
 
     RecentFiles recent(store);
     QVERIFY(recent.files().isEmpty());
-    recent.add(a, QStringLiteral("text/plain"));
-    QTest::qWait(5);
-    recent.add(b, QStringLiteral("text/plain"));
-    QCOMPARE(recent.files(), (QStringList{b, a}));
+    recent.add(a);
+    recent.add(b);
+    recent.add(a);
+    QCOMPARE(recent.files(), (QStringList{a, b}));
 
     RecentFiles again(store);
-    QCOMPARE(again.files(), (QStringList{b, a}));
+    QCOMPARE(again.files(), (QStringList{a, b}));
     again.clear();
     QVERIFY(again.files().isEmpty());
 
-    // Other applications' entries survive.
-    QFile file(store);
-    QVERIFY(file.open(QIODevice::ReadOnly));
-    const QByteArray contents = file.readAll();
-    QVERIFY(contents.contains("file:///other/app.png"));
-    QVERIFY(!contents.contains("recent-b.txt"));
+    // The rest of the settings file stays.
+    QSettings settings(store, QSettings::IniFormat);
+    QVERIFY(!settings.contains(QStringLiteral("Recent/Files")));
+    QCOMPARE(settings.value(QStringLiteral("Editor/wordWrap")).toBool(), false);
 }
 
 QTEST_GUILESS_MAIN(CoreTest)

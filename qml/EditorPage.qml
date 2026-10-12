@@ -17,6 +17,8 @@ FocusScope {
     property int initialLine: 0
     property var initialText: undefined
     property var restoreState: null
+    // A tab back from the last session was opened before; one reopened by the user counts as opened now.
+    property bool fromSession: false
 
     readonly property Document document: _document
     readonly property alias editor: _editor
@@ -144,7 +146,7 @@ FocusScope {
             _pendingCursor = { line: restoreState.line || 0, column: restoreState.column || 0,
                                scroll: restoreState.scroll || 0 }
             if (restoreState.path && restoreState.path.length > 0) {
-                document.load(restoreState.path, chosenEncoding)
+                document.load(restoreState.path, chosenEncoding, !fromSession)
                 if (restoreState.unsaved)
                     document.restoreDraft()
             } else if (restoreState.unsaved) {

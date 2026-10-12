@@ -5,7 +5,7 @@ detection and syntax highlighting for common languages.
 
 ## Dependencies
 
-Qt 6 (Core, Gui, Quick, Quick Controls, DBus, Concurrent, Xml, Linguist tools),
+Qt 6 (Core, Gui, Quick, Quick Controls, DBus, Concurrent, Linguist tools),
 FishUI and the Cutefish framework (`cutefish-framework`).
 
 ```shell

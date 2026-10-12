@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(GNUInstallDirs)
 include(CTest)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 DBus Concurrent Xml LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 DBus Concurrent LinguistTools)
 find_package(CutefishFramework REQUIRED COMPONENTS Application)
 
 add_library(editor-core STATIC
@@ -30,7 +30,7 @@ add_library(editor-core STATIC
 target_include_directories(editor-core PUBLIC src)
 # Linked into the application module.
 set_target_properties(editor-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(editor-core PUBLIC Qt6::Core Qt6::Concurrent Qt6::Xml)
+target_link_libraries(editor-core PUBLIC Qt6::Core Qt6::Concurrent)
 
 cutefish_add_application(${PROJECT_NAME} SOURCES
     src/main.cpp

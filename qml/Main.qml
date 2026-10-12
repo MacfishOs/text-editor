@@ -655,7 +655,7 @@ FishUI.Window {
             return
         }
         for (const state of initialTabs)
-            newTab({ restoreState: state })
+            newTab({ restoreState: state, fromSession: true })
         if (_tabView.count === 0)
             newTab({})
         selectTab(Math.max(0, Math.min(initialIndex, _tabView.count - 1)))

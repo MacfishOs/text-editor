@@ -3,6 +3,7 @@
 
 #include "application.h"
 #include "document.h"
+#include "preferences.h"
 #include "syntax.h"
 #include "textcodec.h"
 
@@ -15,7 +16,6 @@
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QGuiApplication>
-#include <QMimeDatabase>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -38,13 +38,14 @@ static void present(QQuickWindow *window)
 Application::Application(QQmlEngine *engine, QObject *parent)
     : QObject(parent)
     , m_engine(engine)
+    , m_recentFiles(Preferences::ownFile())
 {
     m_sessionTimer.setSingleShot(true);
     m_sessionTimer.setInterval(1000);
     connect(&m_sessionTimer, &QTimer::timeout, this, &Application::saveSession);
 
     Document::setRecentFilesHook([this](const QString &path) {
-        m_recentFiles.add(path, mimeType(path));
+        m_recentFiles.add(path);
     });
 
     // The windows stay: aboutToQuit can run inside one of their QML handlers
@@ -423,11 +424,6 @@ void Application::quit()
     m_quitting = true;
     // Later: this is called from QML handlers of the windows quitting closes.
     QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
-}
-
-QString Application::mimeType(const QString &path) const
-{
-    return QMimeDatabase().mimeTypeForFile(path).name();
 }
 
 void Application::showInFileManager(const QString &path) const

@@ -74,7 +74,6 @@ public:
     // For logout: keeps everything for the next start, whatever the setting.
     void terminate();
 
-    Q_INVOKABLE QString mimeType(const QString &path) const;
     Q_INVOKABLE QString encodingLabel(const QString &encoding) const;
     Q_INVOKABLE void showInFileManager(const QString &path) const;
     Q_INVOKABLE void copyText(const QString &text) const;

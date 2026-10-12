@@ -292,10 +292,11 @@ void Document::updateWritable()
     }
 }
 
-void Document::load(const QString &path, const QString &encoding)
+void Document::load(const QString &path, const QString &encoding, bool addToRecent)
 {
     cancelLoading();
     setFilePath(path);
+    m_addToRecent = addToRecent;
     m_loading = true;
     m_loadProgress = 0;
     emit loadingChanged();
@@ -461,7 +462,7 @@ void Document::finishLoad(const LoadResult &result)
         removeDraft();
     }
 
-    if (!reloading && s_recentFilesHook)
+    if (!reloading && m_addToRecent && s_recentFilesHook)
         s_recentFilesHook(m_filePath);
     emit loaded();
 }
