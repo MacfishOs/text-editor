@@ -443,8 +443,8 @@ FishUI.Window {
             anchors.verticalCenter: parent.verticalCenter
             size: 32
             artwork: "menu"
-            checked: _mainMenu.visible
-            onClicked: _mainMenu.showDropDown(_menuButton, 4)
+            checked: root._mainMenu ? root._mainMenu.visible : false
+            onClicked: root.mainMenu().showDropDown(_menuButton, 4)
             Accessible.name: qsTr("Main Menu")
         }
     }
@@ -518,9 +518,19 @@ FishUI.Window {
 
     // Menus ----------------------------------------------------------------------
 
-    MainMenu {
-        id: _mainMenu
-        window: root
+    // Windows of their own, with thousands of objects in all, so made on the first click.
+    property QtObject _mainMenu: null
+
+    function mainMenu() {
+        if (!_mainMenu)
+            _mainMenu = _mainMenuComponent.createObject(root, { window: root })
+        return _mainMenu
+    }
+
+    Component {
+        id: _mainMenuComponent
+
+        MainMenu {}
     }
 
     property QtObject _preferences: null

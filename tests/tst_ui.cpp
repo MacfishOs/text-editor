@@ -225,8 +225,10 @@ void UiTest::selectionHasNoSeams()
     EditorView *view = editor(window);
     QVERIFY(view->document()->waitForLoaded());
     QTRY_VERIFY(view->contentHeight() > 150 * view->lineHeight());
+    // Lets the reveal the page queues after loading run first; selecting all does not scroll.
+    QTest::qWait(50);
     view->document()->selectAll();
-    // Selecting all brings the cursor at the end into view first.
+    view->ensureCursorVisible();
     QTRY_VERIFY(view->contentY() > 100 * view->lineHeight());
 
     // Scrolled to half a device pixel, where rounding each line on its own split them.
@@ -611,7 +613,9 @@ void UiTest::wrappingAndDialogs()
     m_prefs->setProperty("highlightCurrentLine", false);
     m_prefs->setProperty("showWhitespace", false);
 
-    auto *menu = window->findChild<QQuickWindow *>(QStringLiteral("mainMenu"));
+    QVariant created;
+    QMetaObject::invokeMethod(window, "mainMenu", Q_RETURN_ARG(QVariant, created));
+    auto *menu = created.value<QQuickWindow *>();
     QVERIFY(menu);
     QMetaObject::invokeMethod(menu, "popup");
     QTRY_VERIFY(menu->isVisible());
@@ -682,7 +686,9 @@ void UiTest::gallery()
         }
     }
 
-    if (auto *menu = window->findChild<QQuickWindow *>(QStringLiteral("mainMenu"))) {
+    QVariant created;
+    QMetaObject::invokeMethod(window, "mainMenu", Q_RETURN_ARG(QVariant, created));
+    if (auto *menu = created.value<QQuickWindow *>()) {
         QMetaObject::invokeMethod(menu, "popup");
         QTest::qWait(80);
         save(menu, QStringLiteral("mainmenu"));

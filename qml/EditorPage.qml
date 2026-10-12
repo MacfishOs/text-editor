@@ -36,7 +36,7 @@ FocusScope {
     }
 
     // The card floating over the text, if one is open.
-    readonly property Item card: _findBar.visible ? _findBar : _goToLine.visible ? _goToLine : null
+    readonly property Item card: _findBar && _findBar.visible ? _findBar : _goToLine && _goToLine.visible ? _goToLine : null
     // From the editor's edges, as the other margins of the window.
     readonly property int cardInset: 12
 
@@ -70,29 +70,32 @@ FocusScope {
     }
 
     function showFind(replace) {
-        _goToLine.close()
-        _findBar.open(document.hasSelection && document.selectionLength < 200 && document.selectedText().indexOf("\n") < 0
-                      ? document.selectedText() : "", replace)
+        if (_goToLine)
+            _goToLine.close()
+        findBar().open(document.hasSelection && document.selectionLength < 200 && document.selectedText().indexOf("\n") < 0
+                       ? document.selectedText() : "", replace)
     }
 
     function findNext(backwards) {
-        if (!_findBar.visible && document.searchText.length === 0) {
+        if ((!_findBar || !_findBar.visible) && document.searchText.length === 0) {
             showFind(false)
             return
         }
-        _findBar.find(backwards)
+        findBar().find(backwards)
     }
 
     function showGoToLine() {
-        _findBar.close(false)
+        if (_findBar)
+            _findBar.close(false)
+        if (!_goToLine)
+            _goToLine = _goToLineComponent.createObject(_editorArea, { page: page })
         _goToLine.open()
     }
 
     function setEncodingForReload(encoding) {
         chosenEncoding = encoding
         if (document.modified && !document.untitled) {
-            _reloadConfirm.encoding = encoding
-            _reloadConfirm.open()
+            confirmReload(encoding)
             return
         }
         document.reloadWithEncoding(encoding)
@@ -107,8 +110,7 @@ FocusScope {
             document.reload()
             return
         }
-        _reloadConfirm.encoding = ""
-        _reloadConfirm.open()
+        confirmReload("")
     }
 
     // Where the cursor and the view go once the file is loaded.
@@ -237,7 +239,7 @@ FocusScope {
                         _flick.contentX = x
                         _flick.contentY = y
                     }
-                    onContextMenuRequested: (x, y) => _contextMenu.popup()
+                    onContextMenuRequested: (x, y) => page.popupContextMenu()
                     onZoomRequested: (step) => page.root.zoomBy(step)
                     onFilesDropped: (urls) => page.root.openUrls(urls)
                 }
@@ -250,56 +252,37 @@ FocusScope {
                 running: page.document.loading
             }
 
-            ColumnLayout {
+            Loader {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - 64, 320)
-                spacing: 12
-                visible: page.document.loading && !_loadingDelay.running
+                active: page.document.loading && !_loadingDelay.running
 
-                FishUI.Label {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: qsTr("Opening “%1”…").arg(page.document.fileName)
-                    elide: Text.ElideMiddle
-                    Layout.maximumWidth: parent.width
-                }
+                sourceComponent: ColumnLayout {
+                    spacing: 12
 
-                FishUI.ProgressBar {
-                    Layout.fillWidth: true
-                    from: 0
-                    to: 1
-                    value: page.document.loadProgress
-                }
+                    FishUI.Label {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: qsTr("Opening “%1”…").arg(page.document.fileName)
+                        elide: Text.ElideMiddle
+                        Layout.maximumWidth: parent.width
+                    }
 
-                FishUI.Button {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: qsTr("Cancel")
-                    onClicked: {
-                        page.document.cancelLoading()
-                        page.root.closeTab(page.root.indexOfPage(page), false)
+                    FishUI.ProgressBar {
+                        Layout.fillWidth: true
+                        from: 0
+                        to: 1
+                        value: page.document.loadProgress
+                    }
+
+                    FishUI.Button {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: qsTr("Cancel")
+                        onClicked: {
+                            page.document.cancelLoading()
+                            page.root.closeTab(page.root.indexOfPage(page), false)
+                        }
                     }
                 }
-            }
-
-            FindBar {
-                id: _findBar
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: page.cardInset
-                width: Math.min(460, parent.width - page.cardInset * 2)
-                z: 2
-                page: page
-                onVisibleChanged: if (!visible) page.settleScroll()
-            }
-
-            GoToLineBar {
-                id: _goToLine
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: page.cardInset
-                width: Math.min(implicitWidth, parent.width - page.cardInset * 2)
-                z: 2
-                page: page
-                onVisibleChanged: if (!visible) page.settleScroll()
             }
         }
 
@@ -310,78 +293,135 @@ FocusScope {
         }
     }
 
-    FishUI.DesktopMenu {
-        id: _contextMenu
-        pointerGrabEnabled: true
+    // Made on first use: a restored session builds every tab's page at start.
+    property Item _findBar: null
+    property Item _goToLine: null
+    property QtObject _contextMenu: null
+    property QtObject _reloadConfirm: null
 
-        FishUI.MenuItem {
-            text: qsTr("Undo")
-            shortcut: StandardKey.Undo
-            enabled: page.document.canUndo
-            onTriggered: page.document.undo()
-        }
+    function findBar() {
+        if (!_findBar)
+            _findBar = _findBarComponent.createObject(_editorArea, { page: page })
+        return _findBar
+    }
 
-        FishUI.MenuItem {
-            text: qsTr("Redo")
-            shortcut: "Ctrl+Shift+Z"
-            enabled: page.document.canRedo
-            onTriggered: page.document.redo()
-        }
+    function popupContextMenu() {
+        if (!_contextMenu)
+            _contextMenu = _contextMenuComponent.createObject(page)
+        _contextMenu.popup()
+    }
 
-        FishUI.MenuSeparator {}
+    function confirmReload(encoding) {
+        if (!_reloadConfirm)
+            _reloadConfirm = _reloadConfirmComponent.createObject(page)
+        _reloadConfirm.encoding = encoding
+        _reloadConfirm.open()
+    }
 
-        FishUI.MenuItem {
-            text: qsTr("Cut")
-            shortcut: StandardKey.Cut
-            enabled: page.document.hasSelection && !page.document.locked
-            onTriggered: _editor.cut()
-        }
+    Component {
+        id: _findBarComponent
 
-        FishUI.MenuItem {
-            text: qsTr("Copy")
-            shortcut: StandardKey.Copy
-            enabled: page.document.hasSelection
-            onTriggered: _editor.copy()
-        }
-
-        FishUI.MenuItem {
-            text: qsTr("Paste")
-            shortcut: StandardKey.Paste
-            enabled: !page.document.locked
-            onTriggered: _editor.paste()
-        }
-
-        FishUI.MenuItem {
-            text: qsTr("Delete")
-            shortcut: StandardKey.Delete
-            enabled: page.document.hasSelection && !page.document.locked
-            onTriggered: page.document.deleteSelection()
-        }
-
-        FishUI.MenuSeparator {}
-
-        FishUI.MenuItem {
-            text: qsTr("Select All")
-            shortcut: StandardKey.SelectAll
-            onTriggered: page.document.selectAll()
+        FindBar {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: page.cardInset
+            width: Math.min(460, parent.width - page.cardInset * 2)
+            z: 2
+            onVisibleChanged: if (!visible) page.settleScroll()
         }
     }
 
-    FishUI.ConfirmDialog {
-        id: _reloadConfirm
-        property string encoding: ""
-        parentWindow: page.root
-        showOnCompleted: false
-        title: encoding.length > 0 ? qsTr("Reopen with %1?").arg(App.encodingLabel(encoding))
-                                   : qsTr("Revert “%1”?").arg(page.title)
-        text: qsTr("Your unsaved changes will be lost.")
-        confirmText: encoding.length > 0 ? qsTr("Reopen") : qsTr("Revert")
-        destructive: true
-        onAccepted: {
-            if (encoding.length > 0)
-                page.document.reloadWithEncoding(encoding)
-            else
-                page.document.reload()
+    Component {
+        id: _goToLineComponent
+
+        GoToLineBar {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: page.cardInset
+            width: Math.min(implicitWidth, parent.width - page.cardInset * 2)
+            z: 2
+            onVisibleChanged: if (!visible) page.settleScroll()
+        }
+    }
+
+    Component {
+        id: _contextMenuComponent
+
+        FishUI.DesktopMenu {
+            pointerGrabEnabled: true
+
+            FishUI.MenuItem {
+                text: qsTr("Undo")
+                shortcut: StandardKey.Undo
+                enabled: page.document.canUndo
+                onTriggered: page.document.undo()
+            }
+
+            FishUI.MenuItem {
+                text: qsTr("Redo")
+                shortcut: "Ctrl+Shift+Z"
+                enabled: page.document.canRedo
+                onTriggered: page.document.redo()
+            }
+
+            FishUI.MenuSeparator {}
+
+            FishUI.MenuItem {
+                text: qsTr("Cut")
+                shortcut: StandardKey.Cut
+                enabled: page.document.hasSelection && !page.document.locked
+                onTriggered: _editor.cut()
+            }
+
+            FishUI.MenuItem {
+                text: qsTr("Copy")
+                shortcut: StandardKey.Copy
+                enabled: page.document.hasSelection
+                onTriggered: _editor.copy()
+            }
+
+            FishUI.MenuItem {
+                text: qsTr("Paste")
+                shortcut: StandardKey.Paste
+                enabled: !page.document.locked
+                onTriggered: _editor.paste()
+            }
+
+            FishUI.MenuItem {
+                text: qsTr("Delete")
+                shortcut: StandardKey.Delete
+                enabled: page.document.hasSelection && !page.document.locked
+                onTriggered: page.document.deleteSelection()
+            }
+
+            FishUI.MenuSeparator {}
+
+            FishUI.MenuItem {
+                text: qsTr("Select All")
+                shortcut: StandardKey.SelectAll
+                onTriggered: page.document.selectAll()
+            }
+        }
+    }
+
+    Component {
+        id: _reloadConfirmComponent
+
+        FishUI.ConfirmDialog {
+            property string encoding: ""
+            parentWindow: page.root
+            showOnCompleted: false
+            title: encoding.length > 0 ? qsTr("Reopen with %1?").arg(App.encodingLabel(encoding))
+                                       : qsTr("Revert “%1”?").arg(page.title)
+            text: qsTr("Your unsaved changes will be lost.")
+            confirmText: encoding.length > 0 ? qsTr("Reopen") : qsTr("Revert")
+            destructive: true
+            onAccepted: {
+                if (encoding.length > 0)
+                    page.document.reloadWithEncoding(encoding)
+                else
+                    page.document.reload()
+            }
         }
     }
 }

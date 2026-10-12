@@ -20,7 +20,19 @@ Rectangle {
     color: FishUI.Theme.backgroundColor
 
     function openEncodingMenu() {
-        _encodingMenu.popup()
+        menu("_encodingMenu", _encodingMenuComponent).popup()
+    }
+
+    // Windows of their own, so made on first use: a restored session builds every tab's status bar at start.
+    property QtObject _indentMenu: null
+    property QtObject _languageMenu: null
+    property QtObject _lineEndingMenu: null
+    property QtObject _encodingMenu: null
+
+    function menu(name, component) {
+        if (!control[name])
+            control[name] = component.createObject(control)
+        return control[name]
     }
 
     FishUI.RoundedRectangle {
@@ -95,143 +107,153 @@ Rectangle {
             objectName: "indentationItem"
             text: control.document.insertSpaces ? qsTr("Spaces: %1").arg(control.document.indentWidth)
                                                 : qsTr("Tab Width: %1").arg(control.document.tabWidth)
-            onClicked: _indentMenu.popup()
+            onClicked: control.menu("_indentMenu", _indentMenuComponent).popup()
         }
 
         Item_ {
             objectName: "languageItem"
             text: control.document.languageName
-            onClicked: _languageMenu.popup()
+            onClicked: control.menu("_languageMenu", _languageMenuComponent).popup()
         }
 
         Item_ {
             objectName: "lineEndingItem"
             text: ["LF", "CRLF", "CR"][control.document.lineEnding]
-            onClicked: _lineEndingMenu.popup()
+            onClicked: control.menu("_lineEndingMenu", _lineEndingMenuComponent).popup()
         }
 
         Item_ {
             objectName: "encodingItem"
             text: control.document.encoding + (control.document.bom ? " BOM" : "")
-            onClicked: _encodingMenu.popup()
+            onClicked: control.menu("_encodingMenu", _encodingMenuComponent).popup()
         }
     }
 
-    FishUI.DesktopMenu {
-        id: _indentMenu
-        pointerGrabEnabled: true
+    Component {
+        id: _indentMenuComponent
 
-        FishUI.MenuItem {
-            text: qsTr("Indent with Spaces")
-            checked: control.document.insertSpaces
-            onTriggered: control.document.insertSpaces = true
-        }
-
-        FishUI.MenuItem {
-            text: qsTr("Indent with Tabs")
-            checked: !control.document.insertSpaces
-            onTriggered: control.document.insertSpaces = false
-        }
-
-        FishUI.MenuSeparator {}
-
-        Repeater {
-            model: [2, 3, 4, 8]
+        FishUI.DesktopMenu {
+            pointerGrabEnabled: true
 
             FishUI.MenuItem {
-                text: qsTr("Width: %1").arg(modelData)
-                checked: (control.document.insertSpaces ? control.document.indentWidth : control.document.tabWidth) === modelData
-                onTriggered: {
-                    control.document.indentWidth = modelData
-                    control.document.tabWidth = modelData
+                text: qsTr("Indent with Spaces")
+                checked: control.document.insertSpaces
+                onTriggered: control.document.insertSpaces = true
+            }
+
+            FishUI.MenuItem {
+                text: qsTr("Indent with Tabs")
+                checked: !control.document.insertSpaces
+                onTriggered: control.document.insertSpaces = false
+            }
+
+            FishUI.MenuSeparator {}
+
+            Repeater {
+                model: [2, 3, 4, 8]
+
+                FishUI.MenuItem {
+                    text: qsTr("Width: %1").arg(modelData)
+                    checked: (control.document.insertSpaces ? control.document.indentWidth : control.document.tabWidth) === modelData
+                    onTriggered: {
+                        control.document.indentWidth = modelData
+                        control.document.tabWidth = modelData
+                    }
                 }
             }
         }
     }
 
-    FishUI.DesktopMenu {
-        id: _languageMenu
-        pointerGrabEnabled: true
+    Component {
+        id: _languageMenuComponent
 
-        Repeater {
-            model: App.languages
+        FishUI.DesktopMenu {
+            pointerGrabEnabled: true
 
-            FishUI.MenuItem {
-                text: modelData.name
-                checked: control.document.language === modelData.id
-                onTriggered: {
-                    control.document.language = modelData.id
-                    control.page.chosenLanguage = modelData.id
+            Repeater {
+                model: App.languages
+
+                FishUI.MenuItem {
+                    text: modelData.name
+                    checked: control.document.language === modelData.id
+                    onTriggered: {
+                        control.document.language = modelData.id
+                        control.page.chosenLanguage = modelData.id
+                    }
                 }
             }
         }
     }
 
-    FishUI.DesktopMenu {
-        id: _lineEndingMenu
-        pointerGrabEnabled: true
+    Component {
+        id: _lineEndingMenuComponent
 
-        Repeater {
-            model: 3
+        FishUI.DesktopMenu {
+            pointerGrabEnabled: true
 
-            FishUI.MenuItem {
-                text: control.lineEndingNames[index]
-                checked: control.document.lineEnding === index
-                onTriggered: control.document.lineEnding = index
+            Repeater {
+                model: 3
+
+                FishUI.MenuItem {
+                    text: control.lineEndingNames[index]
+                    checked: control.document.lineEnding === index
+                    onTriggered: control.document.lineEnding = index
+                }
             }
         }
     }
 
-    FishUI.DesktopMenu {
-        id: _encodingMenu
-        // Let the compositor deliver pointer events to the submenu under the cursor.
-        pointerGrabEnabled: false
+    Component {
+        id: _encodingMenuComponent
 
-        FishUI.MenuItem {
-            text: qsTr("Reopen with Encoding")
-            enabled: !control.document.untitled
-            childMenu: _reopenMenu
-        }
+        FishUI.DesktopMenu {
+            id: _encodingMenuWindow
 
-        FishUI.MenuItem {
-            text: qsTr("Save with Encoding")
-            childMenu: _saveMenu
-        }
-
-        FishUI.MenuSeparator {}
-
-        FishUI.MenuItem {
-            text: qsTr("Byte Order Mark")
-            enabled: control.document.encoding.startsWith("UTF-")
-            checked: control.document.bom
-            onTriggered: control.document.bom = !control.document.bom
-        }
-    }
-
-    FishUI.DesktopMenu {
-        id: _reopenMenu
-
-        Repeater {
-            model: App.encodings
+            // Let the compositor deliver pointer events to the submenu under the cursor.
+            pointerGrabEnabled: false
 
             FishUI.MenuItem {
-                text: modelData.label
-                checked: control.document.encoding === modelData.name
-                onTriggered: control.page.setEncodingForReload(modelData.name)
+                text: qsTr("Reopen with Encoding")
+                enabled: !control.document.untitled
+                childMenu: _encodingMenuWindow._reopenMenu
             }
-        }
-    }
-
-    FishUI.DesktopMenu {
-        id: _saveMenu
-
-        Repeater {
-            model: App.encodings
 
             FishUI.MenuItem {
-                text: modelData.label
-                checked: control.document.encoding === modelData.name
-                onTriggered: control.document.setEncoding(modelData.name)
+                text: qsTr("Save with Encoding")
+                childMenu: _encodingMenuWindow._saveMenu
+            }
+
+            FishUI.MenuSeparator {}
+
+            FishUI.MenuItem {
+                text: qsTr("Byte Order Mark")
+                enabled: control.document.encoding.startsWith("UTF-")
+                checked: control.document.bom
+                onTriggered: control.document.bom = !control.document.bom
+            }
+
+            property FishUI.DesktopMenu _reopenMenu: FishUI.DesktopMenu {
+                Repeater {
+                    model: App.encodings
+
+                    FishUI.MenuItem {
+                        text: modelData.label
+                        checked: control.document.encoding === modelData.name
+                        onTriggered: control.page.setEncodingForReload(modelData.name)
+                    }
+                }
+            }
+
+            property FishUI.DesktopMenu _saveMenu: FishUI.DesktopMenu {
+                Repeater {
+                    model: App.encodings
+
+                    FishUI.MenuItem {
+                        text: modelData.label
+                        checked: control.document.encoding === modelData.name
+                        onTriggered: control.document.setEncoding(modelData.name)
+                    }
+                }
             }
         }
     }
