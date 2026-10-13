@@ -59,7 +59,6 @@ class EditorView : public QQuickItem
     Q_PROPERTY(bool matchBrackets READ matchBrackets WRITE setMatchBrackets NOTIFY optionsChanged)
     Q_PROPERTY(bool autoIndent READ autoIndent WRITE setAutoIndent NOTIFY optionsChanged)
     Q_PROPERTY(bool overwriteMode READ overwriteMode WRITE setOverwriteMode NOTIFY overwriteModeChanged)
-    Q_PROPERTY(QString colorScheme READ colorScheme WRITE setColorScheme NOTIFY themeChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY themeChanged)
     Q_PROPERTY(QColor accentColor READ accentColor WRITE setAccentColor NOTIFY themeChanged)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor NOTIFY themeChanged)
@@ -100,8 +99,6 @@ public:
     void setAutoIndent(bool indent);
     bool overwriteMode() const { return m_overwrite; }
     void setOverwriteMode(bool overwrite);
-    QString colorScheme() const { return m_scheme; }
-    void setColorScheme(const QString &scheme);
     bool darkMode() const { return m_dark; }
     void setDarkMode(bool dark);
     QColor accentColor() const { return m_accent; }
@@ -262,7 +259,6 @@ private:
     bool m_matchBrackets = true;
     bool m_autoIndent = true;
     bool m_overwrite = false;
-    QString m_scheme = QStringLiteral("default");
     bool m_dark = false;
     QColor m_accent = QColor(0x3385FF);
     SyntaxTheme m_theme;

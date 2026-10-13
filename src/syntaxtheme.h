@@ -8,10 +8,9 @@
 
 #include <QColor>
 #include <QObject>
-#include <QVariantList>
 
-// A colour scheme: the text area's own colours and one per syntax style,
-// each in a light and a dark variant that follow the system appearance.
+// The text area's own colours and one per syntax style, in a light and a dark
+// variant that follow the system appearance.
 struct SyntaxTheme
 {
     QColor background;
@@ -25,20 +24,18 @@ struct SyntaxTheme
     QColor whitespace;
     QColor styles[int(SyntaxStyle::Count)];
 
-    static SyntaxTheme theme(const QString &scheme, bool dark, const QColor &accent);
+    static SyntaxTheme theme(bool dark, const QColor &accent);
 };
 
-// The schemes offered in the menu, for QML.
+// The theme's colours that QML needs.
 class SyntaxThemes : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QVariantList schemes READ schemes CONSTANT)
 
 public:
     using QObject::QObject;
-    QVariantList schemes() const;
-    // The background a scheme gives the text area.
-    Q_INVOKABLE QColor background(const QString &scheme, bool dark) const;
+    // The background the theme gives the text area.
+    Q_INVOKABLE QColor background(bool dark) const;
 };
 
 #endif

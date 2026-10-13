@@ -115,6 +115,7 @@ FishUI.DialogWindow {
 
             SettingRow {
                 text: qsTr("Size")
+                last: true
 
                 FishUI.ComboBox {
                     anchors.verticalCenter: parent.verticalCenter
@@ -122,19 +123,6 @@ FishUI.DialogWindow {
                     model: control.fontSizes.map(size => size === 0 ? qsTr("System") : size + " pt")
                     currentIndex: Math.max(0, control.fontSizes.indexOf(Prefs.fontSize))
                     onActivated: (index) => Prefs.fontSize = control.fontSizes[index]
-                }
-            }
-
-            SettingRow {
-                text: qsTr("Color Scheme")
-                last: true
-
-                FishUI.ComboBox {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 200
-                    model: Themes.schemes.map(scheme => scheme.name)
-                    currentIndex: Math.max(0, Themes.schemes.findIndex(scheme => scheme.id === Prefs.colorScheme))
-                    onActivated: (index) => Prefs.colorScheme = Themes.schemes[index].id
                 }
             }
         }

@@ -3,9 +3,6 @@
 
 #include "syntaxtheme.h"
 
-#include <QCoreApplication>
-#include <QVariantMap>
-
 struct Palette
 {
     const char *background;
@@ -20,28 +17,11 @@ struct Palette
     const char *preprocessor;
 };
 
-// One Light / One Dark, Solarized and Tokyo Night (Day), as their authors define them.
-static const Palette defaultLight{"#FFFFFF", "#323238", "#A0A1A7", "#A626A4", "#0184BC", "#986801",
+// One Light and One Dark, as their author defines them.
+static const Palette lightPalette{"#FFFFFF", "#323238", "#A0A1A7", "#A626A4", "#0184BC", "#986801",
                                   "#50A14F", "#4078F2", "#E45649", "#C18401"};
-static const Palette defaultDark{"#232325", "#E6E6E6", "#7F848E", "#C678DD", "#56B6C2", "#D19A66",
+static const Palette darkPalette{"#232325", "#E6E6E6", "#7F848E", "#C678DD", "#56B6C2", "#D19A66",
                                  "#98C379", "#61AFEF", "#E06C75", "#E5C07B"};
-static const Palette solarizedLight{"#FDF6E3", "#586E75", "#93A1A1", "#859900", "#B58900", "#CB4B16",
-                                    "#2AA198", "#268BD2", "#D33682", "#CB4B16"};
-static const Palette solarizedDark{"#002B36", "#93A1A1", "#586E75", "#859900", "#B58900", "#CB4B16",
-                                   "#2AA198", "#268BD2", "#D33682", "#CB4B16"};
-static const Palette tokyoDay{"#E1E2E7", "#3760BF", "#848CB5", "#9854F1", "#188092", "#B15C00",
-                              "#587539", "#2E7DE9", "#F52A65", "#8C6C3E"};
-static const Palette tokyoNight{"#1A1B26", "#C0CAF5", "#565F89", "#BB9AF7", "#2AC3DE", "#FF9E64",
-                                "#9ECE6A", "#7AA2F7", "#F7768E", "#7DCFFF"};
-
-static const Palette &palette(const QString &scheme, bool dark)
-{
-    if (scheme == QLatin1String("solarized"))
-        return dark ? solarizedDark : solarizedLight;
-    if (scheme == QLatin1String("tokyonight"))
-        return dark ? tokyoNight : tokyoDay;
-    return dark ? defaultDark : defaultLight;
-}
 
 static QColor alpha(const QColor &color, qreal a)
 {
@@ -50,9 +30,9 @@ static QColor alpha(const QColor &color, qreal a)
     return result;
 }
 
-SyntaxTheme SyntaxTheme::theme(const QString &scheme, bool dark, const QColor &accent)
+SyntaxTheme SyntaxTheme::theme(bool dark, const QColor &accent)
 {
-    const Palette &p = palette(scheme, dark);
+    const Palette &p = dark ? darkPalette : lightPalette;
     SyntaxTheme t;
     t.background = QColor(QLatin1String(p.background));
     t.text = QColor(QLatin1String(p.text));
@@ -102,19 +82,7 @@ SyntaxTheme SyntaxTheme::theme(const QString &scheme, bool dark, const QColor &a
     return t;
 }
 
-QVariantList SyntaxThemes::schemes() const
+QColor SyntaxThemes::background(bool dark) const
 {
-    return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("default")},
-                    {QStringLiteral("name"), QCoreApplication::translate("SyntaxThemes", "Cutefish")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("solarized")},
-                    {QStringLiteral("name"), QCoreApplication::translate("SyntaxThemes", "Solarized")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("tokyonight")},
-                    {QStringLiteral("name"), QCoreApplication::translate("SyntaxThemes", "Tokyo Night")}},
-    };
-}
-
-QColor SyntaxThemes::background(const QString &scheme, bool dark) const
-{
-    return QColor(QLatin1String(palette(scheme, dark).background));
+    return QColor(QLatin1String((dark ? darkPalette : lightPalette).background));
 }

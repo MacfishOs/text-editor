@@ -21,7 +21,7 @@ FishUI.Window {
     windowButtonsTopMargin: 0
     windowButtonsRightMargin: 4
     blurEnabled: false
-    background.color: Themes.background(Prefs.colorScheme, FishUI.Theme.darkMode)
+    background.color: Themes.background(FishUI.Theme.darkMode)
     background.opacity: 1
 
     // Tabs to open with, from a restored session: maps as sessionTabs() makes them.

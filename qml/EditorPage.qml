@@ -226,7 +226,6 @@ FocusScope {
                     showWhitespace: Prefs.showWhitespace
                     matchBrackets: Prefs.matchBrackets
                     autoIndent: Prefs.autoIndent
-                    colorScheme: Prefs.colorScheme
                     darkMode: FishUI.Theme.darkMode
                     accentColor: FishUI.Theme.highlightColor
                     sidePadding: 14

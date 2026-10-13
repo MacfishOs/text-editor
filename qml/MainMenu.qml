@@ -270,17 +270,6 @@ FishUI.DesktopMenu {
             onTriggered: Prefs.matchBrackets = !Prefs.matchBrackets
         }
 
-        FishUI.MenuSeparator {}
-
-        Repeater {
-            model: Themes.schemes
-
-            FishUI.MenuItem {
-                text: modelData.name
-                checked: Prefs.colorScheme === modelData.id
-                onTriggered: Prefs.colorScheme = modelData.id
-            }
-        }
 
         FishUI.MenuSeparator {}
 

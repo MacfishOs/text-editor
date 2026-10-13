@@ -14,7 +14,6 @@ Settings {
     property string fontFamily: ""
     // 0: the system font's size.
     property real fontSize: 0
-    property string colorScheme: "default"
     property bool wordWrap: true
     property bool lineNumbers: true
     property bool highlightCurrentLine: false

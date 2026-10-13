@@ -604,12 +604,10 @@ void UiTest::wrappingAndDialogs()
     const QPoint after = view->positionAt(view->gutterWidth() + 20, 6 + view->lineHeight() * 0.5);
     QCOMPARE(after.y(), 0);
     grab(window, QStringLiteral("wrap"));
-    m_prefs->setProperty("colorScheme", QStringLiteral("tokyonight"));
     m_prefs->setProperty("highlightCurrentLine", true);
     m_prefs->setProperty("showWhitespace", true);
     view->document()->setCursor({4, 7}, {4, 2});
-    grab(window, QStringLiteral("scheme"));
-    m_prefs->setProperty("colorScheme", QStringLiteral("default"));
+    grab(window, QStringLiteral("decorations"));
     m_prefs->setProperty("highlightCurrentLine", false);
     m_prefs->setProperty("showWhitespace", false);
 

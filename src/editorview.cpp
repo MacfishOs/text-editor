@@ -275,14 +275,6 @@ void EditorView::setOverwriteMode(bool overwrite)
     emit overwriteModeChanged();
 }
 
-void EditorView::setColorScheme(const QString &scheme)
-{
-    if (m_scheme == scheme)
-        return;
-    m_scheme = scheme;
-    updateTheme();
-}
-
 void EditorView::setDarkMode(bool dark)
 {
     if (m_dark == dark)
@@ -310,7 +302,7 @@ void EditorView::setSidePadding(qreal padding)
 
 void EditorView::updateTheme()
 {
-    m_theme = SyntaxTheme::theme(m_scheme, m_dark, m_accent);
+    m_theme = SyntaxTheme::theme(m_dark, m_accent);
     m_formats.clear();
     for (int i = 0; i < int(SyntaxStyle::Count); ++i) {
         QTextCharFormat format;
