@@ -4,32 +4,30 @@
 #ifndef RECENTFILES_H
 #define RECENTFILES_H
 
-#include <QObject>
-#include <QStringList>
+#include "base/signal.h"
+
+#include <string>
+#include <vector>
 
 // Files this application opened or saved, kept under [Recent] in its own settings file.
-class RecentFiles : public QObject
+class RecentFiles
 {
-    Q_OBJECT
-    // Local paths, newest first.
-    Q_PROPERTY(QStringList files READ files NOTIFY filesChanged)
-
 public:
-    explicit RecentFiles(const QString &settingsFile, QObject *parent = nullptr);
+    explicit RecentFiles(const std::string &settingsFile);
 
-    QStringList files() const { return m_files; }
+    // Local paths, newest first.
+    const std::vector<std::string> &files() const { return m_files; }
 
-    void add(const QString &path);
-    Q_INVOKABLE void clear();
+    void add(const std::string &path);
+    void clear();
 
-signals:
-    void filesChanged();
+    cutefish::base::Signal<> filesChanged;
 
 private:
     void write();
 
-    QString m_settingsFile;
-    QStringList m_files;
+    std::string m_settingsFile;
+    std::vector<std::string> m_files;
 };
 
 #endif

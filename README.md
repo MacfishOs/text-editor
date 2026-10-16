@@ -5,11 +5,10 @@ detection and syntax highlighting for common languages.
 
 ## Dependencies
 
-Qt 6 (Core, Gui, Quick, Quick Controls, DBus, Concurrent, Linguist tools),
-FishUI and the Cutefish framework (`cutefish-framework`).
+cutefish-toolkit, ICU and PCRE2; GoogleTest for the tests.
 
 ```shell
-sudo apt install cmake qt6-base-dev qt6-declarative-dev qt6-tools-dev qt6-tools-dev-tools
+sudo apt install cmake libicu-dev libpcre2-dev libgtest-dev
 ```
 
 ## Build

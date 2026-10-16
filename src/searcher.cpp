@@ -5,56 +5,57 @@
 
 static const TextRange notFound{{-1, -1}, {-1, -1}};
 
-void Searcher::setPattern(const QString &pattern, const Options &options)
+void Searcher::setPattern(const std::string &pattern, const Options &options)
 {
     m_pattern = pattern;
     m_options = options;
 
-    QString source = options.regularExpression ? pattern : QRegularExpression::escape(pattern);
+    std::string source = options.regularExpression ? pattern : RegExp::escape(pattern);
     if (options.wholeWords)
-        source = QStringLiteral("(?<!\\w)(?:%1)(?!\\w)").arg(source);
-    QRegularExpression::PatternOptions flags = QRegularExpression::UseUnicodePropertiesOption;
+        source = "(?<!\\w)(?:" + source + ")(?!\\w)";
+    unsigned flags = RegExp::UnicodeProperties;
     if (!options.caseSensitive)
-        flags |= QRegularExpression::CaseInsensitiveOption;
-    m_expression = QRegularExpression(source, flags);
-    m_expression.optimize();
+        flags |= RegExp::CaseInsensitive;
+    m_expression = RegExp(source, flags);
 }
 
-QString Searcher::errorString() const
+std::string Searcher::errorString() const
 {
-    return m_expression.isValid() ? QString() : m_expression.errorString();
+    return m_expression.isValid() ? std::string() : m_expression.errorString();
 }
 
-QList<TextRange> Searcher::matchesInLine(const QString &text, int line, int from, int to) const
+std::vector<TextRange> Searcher::matchesInLine(const std::string &text, int line, int from, int to) const
 {
-    QList<TextRange> result;
+    std::vector<TextRange> result;
     if (!isValid())
         return result;
     if (to < 0)
-        to = text.size();
+        to = int(text.size());
 
     // Plain text needs no regular expression.
-    if (!m_options.regularExpression && !m_options.wholeWords) {
-        const Qt::CaseSensitivity cs = m_options.caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
-        qsizetype at = text.indexOf(m_pattern, from, cs);
-        while (at >= 0 && at + m_pattern.size() <= to) {
-            result.append(TextRange{{line, int(at)}, {line, int(at + m_pattern.size())}});
-            at = text.indexOf(m_pattern, at + m_pattern.size(), cs);
+    if (m_options.caseSensitive && !m_options.regularExpression && !m_options.wholeWords) {
+        const int size = int(m_pattern.size());
+        size_t at = text.find(m_pattern, size_t(from));
+        while (at != std::string::npos && int(at) + size <= to) {
+            result.push_back(TextRange{{line, int(at)}, {line, int(at) + size}});
+            at = text.find(m_pattern, at + size_t(size));
         }
         return result;
     }
 
-    auto it = m_expression.globalMatch(text, 0);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch match = it.next();
-        const int start = int(match.capturedStart());
-        const int end = int(match.capturedEnd());
+    // Plain text without case is matched from `from`; patterns from the
+    // start of the line, so look-behinds see it.
+    const bool plain = !m_options.regularExpression && !m_options.wholeWords;
+    m_expression.forEachMatch(text, plain ? size_t(from) : 0, [&](const RegExp::Match &match) {
+        const int start = int(match.start());
+        const int end = int(match.end());
         if (end > to)
-            break;
+            return false;
         if (start < from || start == end)
-            continue;
-        result.append(TextRange{{line, start}, {line, end}});
-    }
+            return true;
+        result.push_back(TextRange{{line, start}, {line, end}});
+        return true;
+    });
     return result;
 }
 
@@ -72,7 +73,7 @@ TextRange Searcher::find(const TextBuffer &buffer, const TextPosition &position,
         from = backwards ? scope.end : scope.start;
 
     auto lineMatches = [&](int line) {
-        const QString &text = buffer.line(line);
+        const std::string &text = buffer.line(line);
         const int lower = line == scope.start.line ? scope.start.column : 0;
         const int upper = line == scope.end.line ? scope.end.column : int(text.size());
         return matchesInLine(text, line, lower, upper);
@@ -101,7 +102,7 @@ TextRange Searcher::find(const TextBuffer &buffer, const TextPosition &position,
         const int first = pass == 0 ? from.line : scope.end.line;
         const int last = pass == 0 ? scope.start.line : from.line;
         for (int line = first; line >= last; --line) {
-            const QList<TextRange> matches = lineMatches(line);
+            const std::vector<TextRange> matches = lineMatches(line);
             for (auto it = matches.crbegin(); it != matches.crend(); ++it) {
                 if (pass == 0 && it->end > from)
                     continue;
@@ -123,40 +124,41 @@ int Searcher::count(const TextBuffer &buffer, const TextRange &scopeRange, int l
     const TextRange scope = scopeRange.isEmpty() ? TextRange{{0, 0}, buffer.end()} : scopeRange.normalized();
     int total = 0;
     for (int line = scope.start.line; line <= scope.end.line && total < limit; ++line) {
-        const QString &text = buffer.line(line);
+        const std::string &text = buffer.line(line);
         const int lower = line == scope.start.line ? scope.start.column : 0;
         const int upper = line == scope.end.line ? scope.end.column : int(text.size());
-        total += matchesInLine(text, line, lower, upper).size();
+        total += int(matchesInLine(text, line, lower, upper).size());
     }
-    return qMin(total, limit);
+    return std::min(total, limit);
 }
 
-QString Searcher::replacement(const TextBuffer &buffer, const TextRange &range, const QString &replace) const
+std::string Searcher::replacement(const TextBuffer &buffer, const TextRange &range, const std::string &replace) const
 {
     if (!m_options.regularExpression)
         return replace;
 
-    const QString &text = buffer.line(range.start.line);
-    const QRegularExpressionMatch match = m_expression.match(text, range.start.column, QRegularExpression::NormalMatch,
-                                                             QRegularExpression::AnchorAtOffsetMatchOption);
-    QString result;
-    for (qsizetype i = 0; i < replace.size(); ++i) {
-        const QChar c = replace.at(i);
-        const QChar next = i + 1 < replace.size() ? replace.at(i + 1) : QChar();
-        if (c == QLatin1Char('\\') && !next.isNull()) {
+    const std::string &text = buffer.line(range.start.line);
+    const RegExp::Match match = m_expression.match(text, size_t(range.start.column), true);
+    auto captured = [&](char digit) { return match.captured(text, digit - '0'); };
+    std::string result;
+    for (size_t i = 0; i < replace.size(); ++i) {
+        const char c = replace[i];
+        const char next = i + 1 < replace.size() ? replace[i + 1] : '\0';
+        const bool digit = next >= '0' && next <= '9';
+        if (c == '\\' && next != '\0') {
             ++i;
-            if (next.isDigit())
-                result += match.captured(next.digitValue());
-            else if (next == QLatin1Char('n'))
-                result += QLatin1Char('\n');
-            else if (next == QLatin1Char('t'))
-                result += QLatin1Char('\t');
+            if (digit)
+                result += captured(next);
+            else if (next == 'n')
+                result += '\n';
+            else if (next == 't')
+                result += '\t';
             else
                 result += next;
-        } else if (c == QLatin1Char('$') && next.isDigit()) {
+        } else if (c == '$' && digit) {
             ++i;
-            result += match.captured(next.digitValue());
-        } else if (c == QLatin1Char('$') && next == QLatin1Char('$')) {
+            result += captured(next);
+        } else if (c == '$' && next == '$') {
             ++i;
             result += c;
         } else {

@@ -10,15 +10,17 @@
 #include "textcodec.h"
 #include "undostack.h"
 
-#include <QDateTime>
-#include <QFutureWatcher>
-#include <QObject>
-#include <QPointer>
-#include <QTimer>
+#include "base/file_watcher.h"
+#include "base/signal.h"
+#include "base/thread_pool.h"
+#include "base/timer.h"
 
 #include <atomic>
+#include <ctime>
 #include <functional>
+#include <future>
 #include <memory>
+#include <optional>
 
 // The end states of each line's highlighting, computed lazily from the top.
 // After an edit only the changed lines are recomputed when the state they
@@ -33,14 +35,14 @@ public:
     int validLines() const { return m_valid; }
     // The state entering `line`; a guess while it is beyond validLines().
     Syntax::State before(int line) const;
-    // Computes states up to `line` or until `deadline` (ms since epoch timer)
-    // runs out. Returns the first line whose entering state changed, or -1,
-    // and sets `last` to the last such line.
-    int advance(const TextBuffer &buffer, int line, qint64 budgetMs, int *last);
+    // Computes states up to `line` or until `budgetMs` runs out. Returns the
+    // first line whose entering state changed, or -1, and sets `last` to the
+    // last such line.
+    int advance(const TextBuffer &buffer, int line, int64_t budgetMs, int *last);
 
 private:
     const Language *m_language = nullptr;
-    QList<Syntax::State> m_end;
+    std::vector<Syntax::State> m_end;
     int m_valid = 0;
     // Lines from m_changedEnd on were valid before the edit; once a line there
     // ends in the state it had, everything up to m_resume is valid again.
@@ -50,56 +52,35 @@ private:
 
 struct LoadResult;
 
-class Document : public QObject
+// When a file was last seen: its modification time and size.
+struct DiskStamp
 {
-    Q_OBJECT
-    Q_PROPERTY(QString title READ title NOTIFY titleChanged)
-    Q_PROPERTY(QString filePath READ filePath NOTIFY filePathChanged)
-    Q_PROPERTY(QString fileName READ fileName NOTIFY filePathChanged)
-    Q_PROPERTY(QString folder READ folder NOTIFY filePathChanged)
-    Q_PROPERTY(bool untitled READ isUntitled NOTIFY filePathChanged)
-    Q_PROPERTY(bool modified READ isModified NOTIFY modifiedChanged)
-    Q_PROPERTY(bool empty READ isEmpty NOTIFY contentsChanged)
-    Q_PROPERTY(bool loading READ isLoading NOTIFY loadingChanged)
-    Q_PROPERTY(qreal loadProgress READ loadProgress NOTIFY loadProgressChanged)
-    // Editing is locked, e.g. for a binary file until the user unlocks it.
-    Q_PROPERTY(bool locked READ isLocked WRITE setLocked NOTIFY lockedChanged)
-    // The file on disk cannot be written; Save turns into Save As.
-    Q_PROPERTY(bool writable READ isWritable NOTIFY writableChanged)
+    timespec modified{};
+    int64_t size = -1;
 
-    Q_PROPERTY(QString encoding READ encoding NOTIFY encodingChanged)
-    Q_PROPERTY(bool bom READ hasBom WRITE setBom NOTIFY encodingChanged)
-    Q_PROPERTY(int lineEnding READ lineEnding WRITE setLineEnding NOTIFY lineEndingChanged)
-    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
-    Q_PROPERTY(QString languageName READ languageName NOTIFY languageChanged)
-    Q_PROPERTY(bool highlighting READ isHighlighting NOTIFY languageChanged)
-    Q_PROPERTY(bool large READ isLarge NOTIFY largeChanged)
-    Q_PROPERTY(bool insertSpaces READ insertSpaces WRITE setInsertSpaces NOTIFY indentationChanged)
-    Q_PROPERTY(int tabWidth READ tabWidth WRITE setTabWidth NOTIFY indentationChanged)
-    Q_PROPERTY(int indentWidth READ indentWidth WRITE setIndentWidth NOTIFY indentationChanged)
+    bool isValid() const { return size >= 0; }
+    friend bool operator==(const DiskStamp &a, const DiskStamp &b)
+    {
+        return a.modified.tv_sec == b.modified.tv_sec && a.modified.tv_nsec == b.modified.tv_nsec && a.size == b.size;
+    }
+};
 
-    Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
-    Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
-    Q_PROPERTY(int lineCount READ lineCount NOTIFY contentsChanged)
+struct DocumentStatistics
+{
+    int64_t lines = 0;
+    int64_t characters = 0;
+    int64_t charactersWithoutSpaces = 0;
+    int64_t words = 0;
+    bool hasSelection = false;
+    int64_t selectionLines = 0;
+    int64_t selectionCharacters = 0;
+    int64_t selectionWords = 0;
+};
 
-    Q_PROPERTY(int cursorLine READ cursorLine NOTIFY cursorChanged)
-    Q_PROPERTY(int cursorColumn READ cursorColumn NOTIFY cursorChanged)
-    // The column counted with tabs expanded, as shown to the user (from 1).
-    Q_PROPERTY(int visualColumn READ visualColumn NOTIFY cursorChanged)
-    Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY cursorChanged)
-    Q_PROPERTY(int selectionLength READ selectionLength NOTIFY cursorChanged)
-
-    Q_PROPERTY(int notice READ notice NOTIFY noticeChanged)
-    Q_PROPERTY(QString noticeDetail READ noticeDetail NOTIFY noticeChanged)
-
-    Q_PROPERTY(QString searchText READ searchText NOTIFY searchChanged)
-    Q_PROPERTY(bool searchValid READ searchValid NOTIFY searchChanged)
-    Q_PROPERTY(QString searchError READ searchError NOTIFY searchChanged)
-    Q_PROPERTY(int matchCount READ matchCount NOTIFY matchesChanged)
-    Q_PROPERTY(int matchIndex READ matchIndex NOTIFY matchesChanged)
-
-    Q_PROPERTY(QString draftId READ draftId WRITE setDraftId NOTIFY draftIdChanged)
-
+// One open text: its buffer, undo history, file, encoding, search state and
+// draft. Changes are announced through the signals below.
+class Document
+{
 public:
     enum Notice {
         NoNotice,
@@ -118,65 +99,69 @@ public:
         MixedLineEndings,
         MalformedSave,
     };
-    Q_ENUM(Notice)
 
     enum CaseChange {
         Upper,
         Lower,
         Title,
     };
-    Q_ENUM(CaseChange)
 
     // The biggest file that is opened; anything larger is refused.
-    static constexpr qint64 maximumFileSize = 256ll * 1024 * 1024;
+    static constexpr int64_t maximumFileSize = 256ll * 1024 * 1024;
     // Above this, highlighting and bracket matching are off.
-    static constexpr qint64 largeFileSize = 4ll * 1024 * 1024;
-    // Lines longer than this are not highlighted.
+    static constexpr int64_t largeFileSize = 4ll * 1024 * 1024;
+    // Lines longer than this, in UTF-16 units, are not highlighted.
     static constexpr int maximumHighlightedLine = 20000;
+    static bool isTooLongToHighlight(const std::string &line);
 
-    explicit Document(QObject *parent = nullptr, const QString &draftId = QString());
-    ~Document() override;
+    explicit Document(const std::string &draftId = std::string());
+    ~Document();
+
+    Document(const Document &) = delete;
+    Document &operator=(const Document &) = delete;
 
     // Opens `path`; empty `encoding` detects it.
     // A tab restored from the session was opened before: it stays where it is in the recent files.
-    Q_INVOKABLE void load(const QString &path, const QString &encoding = QString(), bool addToRecent = true);
-    Q_INVOKABLE void reload();
-    Q_INVOKABLE void reloadWithEncoding(const QString &encoding);
-    Q_INVOKABLE void cancelLoading();
-    // Waits for a load in progress, for tests and the command line.
+    void load(const std::string &path, const std::string &encoding = std::string(), bool addToRecent = true);
+    void reload();
+    void reloadWithEncoding(const std::string &encoding);
+    void cancelLoading();
+    // Waits for a load in progress, running the event loop, for tests and the command line.
     bool waitForLoaded(int timeoutMs = 30000);
 
-    Q_INVOKABLE bool save();
-    Q_INVOKABLE bool saveAs(const QString &path);
+    bool save();
+    bool saveAs(const std::string &path);
     // Saves to the same file in UTF-8, after a LossyEncoding notice.
-    Q_INVOKABLE bool saveAsUtf8();
+    bool saveAsUtf8();
     // Saves after a MalformedSave notice, giving up the bytes that did not decode.
-    Q_INVOKABLE bool saveReplacingMalformed();
-    Q_INVOKABLE void setEncoding(const QString &encoding);
-    Q_INVOKABLE void dismissNotice();
-    Q_INVOKABLE void keepLocalVersion();
+    bool saveReplacingMalformed();
+    void setEncoding(const std::string &encoding);
+    void dismissNotice();
+    void keepLocalVersion();
 
-    QString title() const;
-    QString filePath() const { return m_filePath; }
-    QString fileName() const;
-    QString folder() const;
-    bool isUntitled() const { return m_filePath.isEmpty(); }
+    std::string title() const;
+    const std::string &filePath() const { return m_filePath; }
+    std::string fileName() const;
+    std::string folder() const;
+    bool isUntitled() const { return m_filePath.empty(); }
     bool isModified() const { return m_modified; }
     bool isEmpty() const { return m_buffer.length() == 0; }
     bool isLoading() const { return m_loading; }
-    qreal loadProgress() const { return m_loadProgress; }
+    double loadProgress() const { return m_loadProgress; }
+    // Editing is locked, e.g. for a binary file until the user unlocks it.
     bool isLocked() const { return m_locked; }
     void setLocked(bool locked);
+    // The file on disk cannot be written; Save turns into Save As.
     bool isWritable() const { return m_writable; }
 
-    QString encoding() const { return QString::fromLatin1(m_encoding); }
+    const std::string &encoding() const { return m_encoding; }
     bool hasBom() const { return m_bom; }
     void setBom(bool bom);
     int lineEnding() const { return int(m_lineEnding); }
     void setLineEnding(int lineEnding);
-    QString language() const { return m_language; }
-    void setLanguage(const QString &language);
-    QString languageName() const;
+    const std::string &language() const { return m_language; }
+    void setLanguage(const std::string &language);
+    std::string languageName() const;
     bool isHighlighting() const { return m_highlightingEnabled && m_states.language(); }
     bool isLarge() const { return m_large; }
     bool insertSpaces() const { return m_insertSpaces; }
@@ -186,22 +171,21 @@ public:
     int indentWidth() const { return m_indentWidth; }
     void setIndentWidth(int width);
     // Uses the defaults when the file says nothing about its indentation.
-    Q_INVOKABLE void setIndentationDefaults(bool insertSpaces, int width);
+    void setIndentationDefaults(bool insertSpaces, int width);
 
     bool canUndo() const { return m_undo.canUndo(); }
     bool canRedo() const { return m_undo.canRedo(); }
-    Q_INVOKABLE void undo();
-    Q_INVOKABLE void redo();
+    void undo();
+    void redo();
 
     const TextBuffer &buffer() const { return m_buffer; }
     int lineCount() const { return m_buffer.lineCount(); }
-    Q_INVOKABLE QString text() const { return m_buffer.text(); }
+    std::string text() const { return m_buffer.text(); }
     // Replaces everything as one undoable step.
-    Q_INVOKABLE void setText(const QString &text);
+    void setText(std::string_view text);
 
     // The editing primitive: replaces `range` with `text` and records it.
-    void replace(const TextRange &range, const QString &text, UndoGroup::Kind kind,
-                 const Selection &after);
+    void replace(const TextRange &range, std::string_view text, UndoGroup::Kind kind, const Selection &after);
     void beginEdit();
     void endEdit();
 
@@ -213,24 +197,27 @@ public:
     bool hasSelection() const { return m_cursor != m_anchor; }
     int cursorLine() const { return m_cursor.line; }
     int cursorColumn() const { return m_cursor.column; }
+    // The column counted with tabs expanded, as shown to the user (from 1).
     int visualColumn() const;
-    int selectionLength() const;
-    Q_INVOKABLE QString selectedText() const;
-    Q_INVOKABLE void selectAll();
-    Q_INVOKABLE void goToLine(int line, int column = 1);
+    // In UTF-16 units, as the status bar counts.
+    int64_t selectionLength() const;
+    std::string selectedText() const;
+    void selectAll();
+    // From 1; the column in characters.
+    void goToLine(int line, int column = 1);
 
     // Typing: replaces the selection; in overwrite mode replaces the next character.
-    void insertText(const QString &text, bool overwrite = false);
-    Q_INVOKABLE void paste(const QString &text) { insertText(text); }
+    void insertText(std::string_view text, bool overwrite = false);
+    void paste(std::string_view text) { insertText(text); }
     void insertNewline(bool autoIndent);
     void deleteBackward(bool word);
     void deleteForward(bool word);
-    Q_INVOKABLE void deleteSelection();
-    Q_INVOKABLE void indentSelection(bool unindent);
-    Q_INVOKABLE void moveLines(bool up);
-    Q_INVOKABLE void duplicateLines();
-    Q_INVOKABLE void deleteLines();
-    Q_INVOKABLE void changeCase(int change);
+    void deleteSelection();
+    void indentSelection(bool unindent);
+    void moveLines(bool up);
+    void duplicateLines();
+    void deleteLines();
+    void changeCase(int change);
 
     // Word movement: the start of the previous word or the end of the next.
     TextPosition wordBoundary(const TextPosition &from, bool forward) const;
@@ -238,103 +225,102 @@ public:
     // The bracket matching the one before or after the cursor, or {-1,-1}.
     TextRange matchingBracket(const TextPosition &position) const;
 
-    Q_INVOKABLE QVariantMap statistics() const;
+    DocumentStatistics statistics() const;
 
     int notice() const { return m_notice; }
-    QString noticeDetail() const { return m_noticeDetail; }
+    const std::string &noticeDetail() const { return m_noticeDetail; }
 
     // Search; the matches stay highlighted while the pattern is set.
-    Q_INVOKABLE void setSearch(const QString &text, bool caseSensitive, bool wholeWords, bool regex,
-                               bool inSelection);
-    Q_INVOKABLE void clearSearch();
+    void setSearch(const std::string &text, bool caseSensitive, bool wholeWords, bool regex, bool inSelection);
+    void clearSearch();
     // Selects the next match; returns false when there is none. Sets wrapped.
-    Q_INVOKABLE bool findNext(bool backwards = false);
+    bool findNext(bool backwards = false);
     // While typing the pattern: the first match from where the selection starts.
-    Q_INVOKABLE bool findIncremental();
-    Q_INVOKABLE bool replaceCurrent(const QString &replacement);
-    Q_INVOKABLE int replaceAll(const QString &replacement);
-    QString searchText() const { return m_searcher.pattern(); }
+    bool findIncremental();
+    bool replaceCurrent(const std::string &replacement);
+    int replaceAll(const std::string &replacement);
+    const std::string &searchText() const { return m_searcher.pattern(); }
     bool searchValid() const { return m_searcher.isValid(); }
-    QString searchError() const { return m_searcher.errorString(); }
+    std::string searchError() const { return m_searcher.errorString(); }
     const Searcher &searcher() const { return m_searcher; }
     TextRange searchScope() const { return m_searchScope; }
     int matchCount() const { return m_matchCount; }
     int matchIndex() const { return m_matchIndex; }
-    Q_INVOKABLE bool lastSearchWrapped() const { return m_wrapped; }
+    bool lastSearchWrapped() const { return m_wrapped; }
 
     SyntaxStates &syntaxStates() { return m_states; }
     // Computes highlighting states up to `line`, a slice at a time.
     void requestHighlighting(int line);
 
-    QString draftId() const { return m_draftId; }
-    void setDraftId(const QString &id);
-    static QString draftDirectory();
-    QString draftPath() const;
+    const std::string &draftId() const { return m_draftId; }
+    void setDraftId(const std::string &id);
+    static std::string draftDirectory();
+    std::string draftPath() const;
     // Writes the unsaved text to the draft now, on this thread.
-    Q_INVOKABLE void writeDraftNow();
-    Q_INVOKABLE void removeDraft();
+    void writeDraftNow();
+    void removeDraft();
     // Takes the text of a draft as the unsaved state of this document.
-    Q_INVOKABLE bool restoreDraft();
+    bool restoreDraft();
+    // Starts a draft write on a worker thread, as the draft timer does.
+    void writeDraftAsync();
 
-    QDateTime diskModified() const { return m_diskModified; }
     // Compares the file with what was loaded or saved; reloads or reports.
-    Q_INVOKABLE void checkDisk();
+    void checkDisk();
 
-    static void setRecentFilesHook(std::function<void(const QString &)> hook);
+    static void setRecentFilesHook(std::function<void(const std::string &)> hook);
 
-signals:
-    void titleChanged();
-    void filePathChanged();
-    void modifiedChanged();
-    void loadingChanged();
-    void loadProgressChanged();
-    void lockedChanged();
-    void writableChanged();
-    void encodingChanged();
-    void lineEndingChanged();
-    void languageChanged();
-    void largeChanged();
-    void indentationChanged();
-    void undoChanged();
-    void cursorChanged();
-    void noticeChanged();
-    void searchChanged();
-    void matchesChanged();
+    cutefish::base::Signal<> titleChanged;
+    cutefish::base::Signal<> filePathChanged;
+    cutefish::base::Signal<> modifiedChanged;
+    cutefish::base::Signal<> loadingChanged;
+    cutefish::base::Signal<> loadProgressChanged;
+    cutefish::base::Signal<> lockedChanged;
+    cutefish::base::Signal<> writableChanged;
+    cutefish::base::Signal<> encodingChanged;
+    cutefish::base::Signal<> lineEndingChanged;
+    cutefish::base::Signal<> languageChanged;
+    cutefish::base::Signal<> largeChanged;
+    cutefish::base::Signal<> indentationChanged;
+    cutefish::base::Signal<> undoChanged;
+    cutefish::base::Signal<> cursorChanged;
+    cutefish::base::Signal<> noticeChanged;
+    cutefish::base::Signal<> searchChanged;
+    cutefish::base::Signal<> matchesChanged;
     // Lines [line, line + removed) became [line, line + added).
-    void linesChanged(int line, int removed, int added);
-    void contentsChanged();
+    cutefish::base::Signal<int, int, int> linesChanged;
+    cutefish::base::Signal<> contentsChanged;
     // The entering highlight state of lines [first, last] changed.
-    void syntaxChanged(int first, int last);
+    cutefish::base::Signal<int, int> syntaxChanged;
     // A view should scroll the cursor into view.
-    void revealCursor();
-    void loaded();
-    void draftIdChanged();
-    void saved();
+    cutefish::base::Signal<> revealCursor;
+    cutefish::base::Signal<> loaded;
+    cutefish::base::Signal<> draftIdChanged;
+    cutefish::base::Signal<> saved;
 
 private:
     void applyStep(const EditStep &step, bool reverse);
-    void finishLoad(const LoadResult &result);
-    void replaceWithReloaded(const QList<QString> &lines);
-    void setNotice(Notice notice, const QString &detail = QString());
+    void finishLoad(LoadResult &result);
+    void replaceWithReloaded(const std::vector<std::string> &lines);
+    void setNotice(Notice notice, const std::string &detail = std::string());
     void updateModified();
-    void setFilePath(const QString &path);
+    void setFilePath(const std::string &path);
     void watchFile();
     void updateWritable();
     void detectLanguage();
     void updateMatches();
     void computeMatches();
     void scheduleDraft();
-    Q_INVOKABLE void writeDraftAsync();
     void applyEditorConfig();
-    bool write(const QString &path, const QByteArray &encoding, bool bom);
+    bool write(const std::string &path, const std::string &encoding, bool bom);
     void highlightSlice();
+    void waitForDraftWrite();
 
     TextBuffer m_buffer;
     UndoStack m_undo;
     TextPosition m_cursor;
     TextPosition m_anchor;
 
-    QString m_filePath;
+    std::string m_filePath;
     bool m_modified = false;
     // The encoding, BOM or line ending changed since the last save.
     bool m_formatModified = false;
@@ -343,16 +329,16 @@ private:
     bool m_restoreDraftAfterLoad = false;
     // Some bytes did not decode; saving as is would replace them for good.
     bool m_malformed = false;
-    QByteArray m_loadedEncoding;
+    std::string m_loadedEncoding;
     bool m_loading = false;
-    qreal m_loadProgress = 0;
+    double m_loadProgress = 0;
     bool m_locked = false;
     bool m_writable = true;
     bool m_large = false;
-    QByteArray m_encoding = QByteArrayLiteral("UTF-8");
+    std::string m_encoding = "UTF-8";
     bool m_bom = false;
     LineEnding m_lineEnding = LineEnding::Unix;
-    QString m_language;
+    std::string m_language;
     bool m_languageChosen = false;
     bool m_highlightingEnabled = true;
     bool m_insertSpaces = true;
@@ -363,35 +349,34 @@ private:
     std::optional<bool> m_finalNewline;
 
     int m_notice = NoNotice;
-    QString m_noticeDetail;
+    std::string m_noticeDetail;
 
     Searcher m_searcher;
     TextRange m_searchScope;
     int m_matchCount = 0;
     int m_matchIndex = 0;
     bool m_wrapped = false;
-    QTimer m_matchTimer;
+    cutefish::base::Timer m_matchTimer;
 
     SyntaxStates m_states;
     int m_highlightTarget = 0;
-    QTimer m_highlightTimer;
+    cutefish::base::Timer m_highlightTimer;
 
-    QString m_draftId;
-    QTimer m_draftTimer;
-    QFuture<void> m_draftWrite;
+    std::string m_draftId;
+    cutefish::base::Timer m_draftTimer;
+    std::future<void> m_draftWrite;
 
-    QString m_watchedFile;
-    QString m_watchedFolder;
-    QDateTime m_diskModified;
-    qint64 m_diskSize = -1;
-    QTimer m_diskCheckTimer;
+    cutefish::base::FileWatch m_watch;
+    std::string m_watchedFile;
+    DiskStamp m_diskStamp;
+    cutefish::base::Timer m_diskCheckTimer;
     // The disk changed while the buffer was modified and the user kept theirs.
     bool m_ignoreDisk = false;
 
-    QFutureWatcher<LoadResult> *m_loadWatcher = nullptr;
+    cutefish::base::Job m_loadJob;
     std::shared_ptr<std::atomic<int>> m_loadProgressShared;
     std::shared_ptr<std::atomic<bool>> m_loadCancel;
-    QTimer m_progressTimer;
+    cutefish::base::Timer m_progressTimer;
     // A reload keeps the cursor and scroll position.
     bool m_reloading = false;
     bool m_addToRecent = true;

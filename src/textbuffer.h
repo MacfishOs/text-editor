@@ -4,10 +4,13 @@
 #ifndef TEXTBUFFER_H
 #define TEXTBUFFER_H
 
-#include <QList>
-#include <QString>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
-// A place in the text: a line and a UTF-16 offset into it.
+// A place in the text: a line and a UTF-8 byte offset into it, always on a
+// character boundary.
 struct TextPosition
 {
     int line = 0;
@@ -48,34 +51,35 @@ class TextBuffer
 public:
     TextBuffer();
 
-    void setText(const QString &text);
-    void setLines(QList<QString> lines);
+    void setText(std::string_view text);
+    void setLines(std::vector<std::string> lines);
 
-    int lineCount() const { return m_lines.size(); }
-    const QString &line(int index) const { return m_lines.at(index); }
-    const QList<QString> &lines() const { return m_lines; }
+    int lineCount() const { return int(m_lines.size()); }
+    const std::string &line(int index) const { return m_lines[size_t(index)]; }
+    const std::vector<std::string> &lines() const { return m_lines; }
 
-    QString text() const;
-    QString text(const TextRange &range) const;
-    // Characters including one per line break.
-    qint64 length() const { return m_length; }
+    std::string text() const;
+    std::string text(const TextRange &range) const;
+    // Bytes including one per line break.
+    int64_t length() const { return m_length; }
 
+    // Within the text and on a character boundary.
     TextPosition clamp(const TextPosition &position) const;
     TextPosition end() const;
 
     // Returns where the inserted text ends.
-    TextPosition insert(const TextPosition &position, const QString &text);
+    TextPosition insert(const TextPosition &position, std::string_view text);
     void remove(const TextRange &range);
 
-    qint64 offset(const TextPosition &position) const;
-    TextPosition position(qint64 offset) const;
+    int64_t offset(const TextPosition &position) const;
+    TextPosition position(int64_t offset) const;
 
     // Where the given text ends when inserted at position.
-    static TextPosition endOf(const TextPosition &position, const QString &text);
+    static TextPosition endOf(const TextPosition &position, std::string_view text);
 
 private:
-    QList<QString> m_lines;
-    qint64 m_length = 0;
+    std::vector<std::string> m_lines;
+    int64_t m_length = 0;
 };
 
 #endif

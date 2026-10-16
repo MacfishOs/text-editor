@@ -4,114 +4,108 @@
 #ifndef APPLICATION_H
 #define APPLICATION_H
 
+#include "editorwindow.h"
 #include "recentfiles.h"
 #include "session.h"
 
-#include <QFont>
-#include <QObject>
-#include <QPointer>
-#include <QTimer>
-#include <QUrl>
-#include <QVariantList>
+#include "base/signal.h"
+#include "base/timer.h"
+#include "ui/glyph_run.h"
 
-class Document;
-class QQmlComponent;
-class QQmlEngine;
-class QQuickWindow;
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace cutefish::base::dbus {
+class Object;
+}
+
+class EditorSettings;
 
 // The editor process: its windows, the session they are saved to, the
 // recently used files and the D-Bus service later launches hand their files to.
-class Application : public QObject
+class EditorApplication
 {
-    Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "com.cutefish.TextEditor")
-    Q_PROPERTY(RecentFiles *recentFiles READ recentFiles CONSTANT)
-    Q_PROPERTY(QFont systemFont READ systemFont NOTIFY systemFontChanged)
-    Q_PROPERTY(QStringList monospaceFamilies READ monospaceFamilies CONSTANT)
-    Q_PROPERTY(QVariantList encodings READ encodings CONSTANT)
-    Q_PROPERTY(QVariantList languages READ languages CONSTANT)
-    Q_PROPERTY(bool canReopenClosedTab READ canReopenClosedTab NOTIFY closedTabsChanged)
-    Q_PROPERTY(int windowCount READ windowCount NOTIFY windowCountChanged)
-    // Set by QML from the settings: quitting keeps the session without asking.
-    Q_PROPERTY(bool restoreSession MEMBER m_restoreSession NOTIFY restoreSessionChanged)
-    // Windows closing now are the process ending, not the user closing them.
-    Q_PROPERTY(bool quitting READ isQuitting CONSTANT)
-
 public:
-    explicit Application(QQmlEngine *engine, QObject *parent = nullptr);
-    ~Application() override;
+    explicit EditorApplication(EditorSettings &settings);
+    ~EditorApplication();
 
-    // Restores the last session, then opens `arguments` (paths and +LINE),
-    // or an empty document when there is nothing at all.
-    void start(const QStringList &arguments, const QString &workingDirectory, const QString &standardInput);
+    EditorApplication(const EditorApplication &) = delete;
+    EditorApplication &operator=(const EditorApplication &) = delete;
 
-    RecentFiles *recentFiles() { return &m_recentFiles; }
-    QFont systemFont() const;
-    QStringList monospaceFamilies() const;
-    QVariantList encodings() const;
-    QVariantList languages() const;
-    bool canReopenClosedTab() const { return !m_closedTabs.isEmpty(); }
+    EditorSettings &settings() const { return m_settings; }
+    RecentFiles &recentFiles() { return m_recentFiles; }
+
+    std::vector<std::string> monospaceFamilies() const;
+    static std::string encodingLabel(const std::string &encoding);
+    // Plain Text first, then the languages by name: (id, name).
+    std::vector<std::pair<std::string, std::string>> languages() const;
+
+    bool canReopenClosedTab() const { return !m_closedTabs.empty(); }
     int windowCount() const;
     bool isQuitting() const { return m_quitting; }
 
-    Q_INVOKABLE Document *createDocument(QObject *owner, const QString &draftId = QString());
-    Q_INVOKABLE QQuickWindow *newWindow(const QVariantMap &properties = {});
-    // Destroys a closed window once the event loop it closed in is back.
-    Q_INVOKABLE void releaseWindow(QQuickWindow *window);
-    Q_INVOKABLE void windowActivated(QQuickWindow *window);
+    EditorWindow *newWindow(EditorWindow::Options options = {});
+    // Destroys a closed window once the event it closed in is over.
+    void releaseWindow(EditorWindow *window);
+    void windowActivated(EditorWindow *window);
+    std::vector<EditorWindow *> windows() const;
     // Opens files in the window used last, or focuses their tabs where they are open.
-    Q_INVOKABLE void openPaths(const QStringList &paths, int line = 0, QQuickWindow *window = nullptr);
-    Q_INVOKABLE QVariantMap findOpenDocument(const QString &path) const;
-    Q_INVOKABLE QVariantList windowList() const;
+    void openPaths(const std::vector<std::string> &paths, int line = 0, EditorWindow *window = nullptr);
+    struct OpenDocument
+    {
+        EditorWindow *window;
+        int index;
+    };
+    std::optional<OpenDocument> findOpenDocument(const std::string &path) const;
 
-    Q_INVOKABLE void pushClosedTab(const QVariantMap &state);
-    Q_INVOKABLE QVariantMap takeClosedTab();
+    void pushClosedTab(const TabState &state);
+    std::optional<TabState> takeClosedTab();
 
-    Q_INVOKABLE void scheduleSessionSave();
-    Q_INVOKABLE void saveSession();
+    void scheduleSessionSave();
+    void saveSession();
     // Saves the session and drafts and ends the process, without asking.
-    Q_INVOKABLE void quit();
+    void quit();
     // For logout: keeps everything for the next start, whatever the setting.
     void terminate();
 
-    Q_INVOKABLE QString encodingLabel(const QString &encoding) const;
-    Q_INVOKABLE void showInFileManager(const QString &path) const;
-    Q_INVOKABLE void copyText(const QString &text) const;
-    Q_INVOKABLE QString urlToPath(const QUrl &url) const;
-    Q_INVOKABLE QUrl pathToUrl(const QString &path) const;
-    Q_INVOKABLE bool fileExists(const QString &path) const;
+    void showInFileManager(const std::string &path) const;
+    void copyText(const std::string &text) const;
 
-    QQmlEngine *engine() const { return m_engine; }
+    // Restores the last session, then opens `arguments` (paths and +LINE),
+    // or an empty document when there is nothing at all.
+    void start(const std::vector<std::string> &arguments, const std::string &workingDirectory,
+               const std::optional<std::string> &standardInput);
 
-public slots:
-    // D-Bus: a later launch's files, resolved against its working directory.
-    Q_SCRIPTABLE void Open(const QStringList &arguments, const QString &workingDirectory);
-    Q_SCRIPTABLE void OpenText(const QString &text);
-    Q_SCRIPTABLE void NewWindow();
+    // The D-Bus methods: a later launch's files, resolved against its working directory.
+    void open(const std::vector<std::string> &arguments, const std::string &workingDirectory);
+    void openText(const std::string &text);
+    void newWindowFromBus();
+    // Registers com.cutefish.TextEditor; false when another process has it.
+    bool registerService();
 
-signals:
-    void systemFontChanged();
-    void closedTabsChanged();
-    void windowCountChanged();
-    void restoreSessionChanged();
+    cutefish::base::Signal<> closedTabsChanged;
+    cutefish::base::Signal<> windowCountChanged;
 
 private:
-    QQuickWindow *targetWindow(QQuickWindow *preferred = nullptr);
-    QList<QQuickWindow *> windows() const;
+    EditorWindow *targetWindow(EditorWindow *preferred = nullptr);
     void restore();
-    void openText(const QString &text);
-    QSet<QString> liveDraftIds() const;
+    std::set<std::string> liveDraftIds() const;
     void flushDrafts();
 
-    QQmlEngine *m_engine;
-    QQmlComponent *m_component = nullptr;
-    QList<QPointer<QQuickWindow>> m_windows;
-    QPointer<QQuickWindow> m_lastActive;
+    EditorSettings &m_settings;
     RecentFiles m_recentFiles;
-    QList<QVariantMap> m_closedTabs;
-    QTimer m_sessionTimer;
-    bool m_restoreSession = true;
+    std::vector<std::unique_ptr<EditorWindow>> m_windows;
+    // Front to back: the window brought forward last is at the end.
+    std::vector<EditorWindow *> m_order;
+    EditorWindow *m_lastActive = nullptr;
+    std::vector<TabState> m_closedTabs;
+    cutefish::base::Timer m_sessionTimer;
     bool m_quitting = false;
+    std::unique_ptr<cutefish::base::dbus::Object> m_service;
 };
 
 #endif

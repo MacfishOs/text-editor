@@ -6,14 +6,16 @@
 
 #include "textbuffer.h"
 
-#include <QList>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 // One replacement: `removed` was at `at` and `inserted` took its place.
 struct EditStep
 {
     TextPosition at;
-    QString removed;
-    QString inserted;
+    std::string removed;
+    std::string inserted;
 };
 
 struct Selection
@@ -31,11 +33,11 @@ struct UndoGroup
         Delete,
     };
 
-    QList<EditStep> steps;
+    std::vector<EditStep> steps;
     Selection before;
     Selection after;
     Kind kind = Other;
-    qint64 time = 0;
+    int64_t time = 0;
 };
 
 // Edits grouped the way they are undone: typing and deleting by the word,
@@ -52,12 +54,12 @@ public:
     bool inGroup() const { return m_depth > 0; }
 
     void record(const EditStep &step, UndoGroup::Kind kind, const Selection &before,
-                const Selection &after, qint64 time);
+                const Selection &after, int64_t time);
     // Stops the next record from merging into the last group.
     void seal() { m_sealed = true; }
 
     bool canUndo() const { return m_index > 0; }
-    bool canRedo() const { return m_index < m_groups.size(); }
+    bool canRedo() const { return m_index < int(m_groups.size()); }
     // The group to revert or reapply; the stack moves past it.
     const UndoGroup &undo();
     const UndoGroup &redo();
@@ -68,12 +70,12 @@ public:
     bool isClean() const { return m_cleanIndex == m_index; }
 
     int index() const { return m_index; }
-    int count() const { return m_groups.size(); }
+    int count() const { return int(m_groups.size()); }
 
 private:
-    bool canMerge(const UndoGroup &group, const EditStep &step, UndoGroup::Kind kind, qint64 time) const;
+    bool canMerge(const UndoGroup &group, const EditStep &step, UndoGroup::Kind kind, int64_t time) const;
 
-    QList<UndoGroup> m_groups;
+    std::vector<UndoGroup> m_groups;
     int m_index = 0;
     int m_cleanIndex = 0;
     int m_depth = 0;

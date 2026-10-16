@@ -4,23 +4,25 @@
 #ifndef EDITORVIEW_H
 #define EDITORVIEW_H
 
+#include "codelayout.h"
 #include "document.h"
 #include "syntaxtheme.h"
 
-#include <QBasicTimer>
-#include <QElapsedTimer>
-#include <QFont>
-#include <QPointer>
-#include <QQuickItem>
-#include <QTextLayout>
-#include <QTimer>
+#include "base/elapsed_timer.h"
+#include "base/signal.h"
+#include "base/timer.h"
+#include "ui/glyph_run.h"
+#include "ui/scroller.h"
+#include "ui/view.h"
 
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-class QSGNode;
-class QSGTextNode;
+namespace cutefish::ui {
+class ScrollBar;
+}
 
 // Prefix sums of the visual line counts, for mapping between document lines
 // and their vertical positions in O(log n).
@@ -30,153 +32,122 @@ public:
     void build(const std::vector<int> &counts);
     void add(int line, int delta);
     // Visual lines before `line`.
-    qint64 before(int line) const;
-    qint64 total() const { return m_total; }
+    int64_t before(int line) const;
+    int64_t total() const { return m_total; }
     // The line containing visual line `visual`; `offset` is its index within it.
-    int lineAt(qint64 visual, int *offset) const;
+    int lineAt(int64_t visual, int *offset) const;
     int size() const { return m_size; }
 
 private:
-    std::vector<qint64> m_tree;
+    std::vector<int64_t> m_tree;
     int m_size = 0;
-    qint64 m_total = 0;
+    int64_t m_total = 0;
 };
 
-// Draws a Document and edits it: only the lines in view are laid out and
-// turned into scene graph nodes, so a file of any size scrolls and types as
-// fast as a short one. Scrolling is driven from outside through contentX and
-// contentY (a Flickable with FishUI's touchpad physics); the view asks for
-// scroll changes with scrollRequested().
-class EditorView : public QQuickItem
+// Draws a Document and edits it: only the lines in view are laid out, so a
+// file of any size scrolls and types as fast as a short one. It scrolls
+// itself, with the shared touchpad physics, wheel steps and overlay scroll
+// bars.
+class EditorView : public cutefish::ui::View
 {
-    Q_OBJECT
-    Q_PROPERTY(Document *document READ document WRITE setDocument NOTIFY documentChanged)
-    Q_PROPERTY(QFont font READ font WRITE setFont NOTIFY fontChanged)
-    Q_PROPERTY(bool wordWrap READ wordWrap WRITE setWordWrap NOTIFY optionsChanged)
-    Q_PROPERTY(bool lineNumbers READ lineNumbers WRITE setLineNumbers NOTIFY optionsChanged)
-    Q_PROPERTY(bool highlightCurrentLine READ highlightCurrentLine WRITE setHighlightCurrentLine NOTIFY optionsChanged)
-    Q_PROPERTY(bool showWhitespace READ showWhitespace WRITE setShowWhitespace NOTIFY optionsChanged)
-    Q_PROPERTY(bool matchBrackets READ matchBrackets WRITE setMatchBrackets NOTIFY optionsChanged)
-    Q_PROPERTY(bool autoIndent READ autoIndent WRITE setAutoIndent NOTIFY optionsChanged)
-    Q_PROPERTY(bool overwriteMode READ overwriteMode WRITE setOverwriteMode NOTIFY overwriteModeChanged)
-    Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY themeChanged)
-    Q_PROPERTY(QColor accentColor READ accentColor WRITE setAccentColor NOTIFY themeChanged)
-    Q_PROPERTY(QColor backgroundColor READ backgroundColor NOTIFY themeChanged)
-    Q_PROPERTY(qreal sidePadding READ sidePadding WRITE setSidePadding NOTIFY optionsChanged)
-
-    Q_PROPERTY(qreal contentX READ contentX WRITE setContentX NOTIFY contentXChanged)
-    Q_PROPERTY(qreal contentY READ contentY WRITE setContentY NOTIFY contentYChanged)
-    Q_PROPERTY(qreal contentWidth READ contentWidth NOTIFY contentSizeChanged)
-    Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentSizeChanged)
-    Q_PROPERTY(qreal lineHeight READ lineHeight NOTIFY metricsChanged)
-    Q_PROPERTY(qreal gutterWidth READ gutterWidth NOTIFY metricsChanged)
-    Q_PROPERTY(QRectF cursorRectangle READ cursorRectangle NOTIFY cursorRectangleChanged)
-    // A panel floating over the top right of the view, from occludedLeft to the
-    // right edge and occludedHeight down: the cursor is revealed clear of it,
-    // scrolling above the first line when it has to.
-    Q_PROPERTY(qreal occludedLeft MEMBER m_occludedLeft NOTIFY occlusionChanged)
-    Q_PROPERTY(qreal occludedHeight MEMBER m_occludedHeight NOTIFY occlusionChanged)
-
 public:
-    explicit EditorView(QQuickItem *parent = nullptr);
+    EditorView();
     ~EditorView() override;
 
     Document *document() const { return m_document; }
     void setDocument(Document *document);
-    QFont font() const { return m_font; }
-    void setFont(const QFont &font);
+    // The family empty takes the system's monospace font.
+    void setFont(const cutefish::ui::FontSpec &font);
+    const cutefish::ui::FontSpec &font() const { return m_font; }
     bool wordWrap() const { return m_wordWrap; }
     void setWordWrap(bool wrap);
     bool lineNumbers() const { return m_lineNumbers; }
     void setLineNumbers(bool show);
-    bool highlightCurrentLine() const { return m_highlightCurrentLine; }
     void setHighlightCurrentLine(bool highlight);
-    bool showWhitespace() const { return m_showWhitespace; }
     void setShowWhitespace(bool show);
-    bool matchBrackets() const { return m_matchBrackets; }
     void setMatchBrackets(bool match);
     bool autoIndent() const { return m_autoIndent; }
     void setAutoIndent(bool indent);
     bool overwriteMode() const { return m_overwrite; }
     void setOverwriteMode(bool overwrite);
-    bool darkMode() const { return m_dark; }
     void setDarkMode(bool dark);
-    QColor accentColor() const { return m_accent; }
-    void setAccentColor(const QColor &color);
-    QColor backgroundColor() const { return m_theme.background; }
-    qreal sidePadding() const { return m_sidePadding; }
-    void setSidePadding(qreal padding);
+    void setAccentColor(cutefish::ui::Color color);
+    cutefish::ui::Color backgroundColor() const { return m_theme.background; }
+    void setSidePadding(double padding);
+    // Scroll bars drawn for the text's background: light on a dark one.
+    void setScrollBarDarkMode(bool dark);
+    // A panel floating over the top right of the view, from `left` to the
+    // right edge and `height` down: the cursor is revealed clear of it,
+    // scrolling above the first line when it has to.
+    void setOcclusion(double left, double height);
 
-    qreal contentX() const { return m_contentX; }
-    void setContentX(qreal x);
-    qreal contentY() const { return m_contentY; }
-    void setContentY(qreal y);
-    qreal contentWidth() const { return m_contentWidth; }
-    qreal contentHeight() const { return m_contentHeight; }
-    qreal lineHeight() const { return m_lineHeight; }
-    qreal gutterWidth() const;
-    QRectF cursorRectangle() const;
+    double contentX() const { return m_contentX; }
+    double contentY() const { return m_contentY; }
+    void setContentPosition(double x, double y);
+    double contentWidth() const { return m_contentWidth; }
+    double contentHeight() const { return m_contentHeight; }
+    double lineHeight() const { return m_lineHeight; }
+    double gutterWidth() const;
+    // In the view's coordinates.
+    cutefish::ui::RectF cursorRectangle() const { return m_caret; }
 
-    Q_INVOKABLE void cut();
-    Q_INVOKABLE void copy();
-    Q_INVOKABLE void paste();
-    Q_INVOKABLE void ensureCursorVisible(bool center = false);
-    // The text position under a point of this item, as {line, column}.
-    Q_INVOKABLE QPoint positionAt(qreal x, qreal y);
+    void cut();
+    void copy();
+    void paste();
+    void ensureCursorVisible(bool center = false);
+    // The text position under a point of this view.
+    TextPosition positionAt(cutefish::ui::PointF point);
     // Scrolls so `line` (from 0) is at the top, e.g. when a session is restored.
-    Q_INVOKABLE void scrollToLine(qreal line);
-    Q_INVOKABLE qreal topLine() const;
+    void scrollToLine(double line);
+    double topLine() const;
+    // A press over the text, as the context menu opens from one.
+    void typeText(std::string_view text);
 
-signals:
-    void documentChanged();
-    void fontChanged();
-    void optionsChanged();
-    void overwriteModeChanged();
-    void themeChanged();
-    void contentXChanged();
-    void contentYChanged();
-    void contentSizeChanged();
-    void metricsChanged();
-    void cursorRectangleChanged();
-    void scrollRequested(qreal x, qreal y);
-    void contextMenuRequested(qreal x, qreal y);
-    void zoomRequested(int step);
-    void filesDropped(const QList<QUrl> &urls);
-    void occlusionChanged();
+    // Lays out what is in view now, as a frame would; for tests.
+    void updateNow();
+
+    cutefish::base::Signal<> optionsChanged;
+    cutefish::base::Signal<> overwriteModeChanged;
+    cutefish::base::Signal<> metricsChanged;
+    cutefish::base::Signal<> scrolled;
+    std::function<void(cutefish::ui::PointF position)> onContextMenuRequested;
+    std::function<void(int step)> onZoomRequested;
+    std::function<void(const std::vector<std::string> &paths)> onFilesDropped;
+
+    cutefish::ui::CursorShape cursorShape() const override;
+    bool acceptsPointer() const override { return true; }
+    bool acceptsFocus() const override { return true; }
 
 protected:
-    void updatePolish() override;
-    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
-    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
-    void itemChange(ItemChange change, const ItemChangeData &value) override;
-    void releaseResources() override;
-    bool event(QEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;
-    void inputMethodEvent(QInputMethodEvent *event) override;
-    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
-    void focusInEvent(QFocusEvent *event) override;
-    void focusOutEvent(QFocusEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
-    void mouseMoveEvent(QMouseEvent *event) override;
-    void mouseReleaseEvent(QMouseEvent *event) override;
-    void mouseDoubleClickEvent(QMouseEvent *event) override;
-    void hoverMoveEvent(QHoverEvent *event) override;
-    void wheelEvent(QWheelEvent *event) override;
-    void dragEnterEvent(QDragEnterEvent *event) override;
-    void dragMoveEvent(QDragMoveEvent *event) override;
-    void dragLeaveEvent(QDragLeaveEvent *event) override;
-    void dropEvent(QDropEvent *event) override;
-    void timerEvent(QTimerEvent *event) override;
+    void layout() override;
+    void paint(cutefish::ui::Painter &painter) override;
+    void pointerPress(const cutefish::ui::PointerEvent &event) override;
+    void pointerMove(const cutefish::ui::PointerEvent &event) override;
+    void pointerRelease(const cutefish::ui::PointerEvent &event) override;
+    void hoverMove(const cutefish::ui::PointerEvent &event) override;
+    bool keyPress(const cutefish::ui::KeyEvent &event) override;
+    bool scroll(const cutefish::ui::ScrollEvent &event) override;
+    bool gesture(const cutefish::ui::GestureEvent &event) override;
+    void focusIn(cutefish::ui::FocusReason reason) override;
+    void focusOut() override;
+    bool acceptsTextInput() const override;
+    cutefish::ui::TextInputState textInputState() const override;
+    void textInput(const cutefish::ui::TextInputEvent &event) override;
+    bool canDrop(const cutefish::ui::DropOffer &offer) const override;
+    void dragEnter(const cutefish::ui::DragEvent &event) override;
+    uint32_t dragUpdate(const cutefish::ui::DragEvent &event) override;
+    void dragLeave() override;
+    uint32_t drop(const cutefish::ui::DragEvent &event) override;
 
 private:
+    class ScrollTarget;
+
     struct Segment
     {
         int start = 0;
         int length = 0;
         int firstVisual = 0;
-        // Kept when the segment's layout is reused, so its node is too.
-        quint64 version = 0;
-        std::unique_ptr<QTextLayout> layout;
+        std::unique_ptr<CodeLayout> layout;
     };
 
     // The laid-out form of a line in or near view.
@@ -184,30 +155,33 @@ private:
     {
         std::vector<Segment> segments;
         int visualLines = 1;
-        qreal width = 0;
+        double width = 0;
         bool provisionalSyntax = false;
         // No colours or input method text: segments can be reused as they are.
         bool plain = true;
-        // Bumped whenever the layouts are rebuilt, so nodes know to refresh.
-        quint64 version = 0;
         int preeditColumn = -1;
     };
 
     struct LineInfo
     {
-        quint32 id = 0;
+        uint32_t id = 0;
         int visualLines = 1;
         int columns = 0;
         bool exact = false;
     };
 
-    // One frame's worth of what to draw, computed in polish.
     struct PlannedLine
     {
         int line;
-        quint32 id;
-        qreal top;
+        uint32_t id;
+        double top;
         LineCache *cache;
+    };
+
+    struct Rect
+    {
+        cutefish::ui::RectF rect;
+        cutefish::ui::Color color;
     };
 
     void onLinesChanged(int line, int removed, int added);
@@ -216,42 +190,46 @@ private:
     void invalidateLayouts(bool estimates);
     void updateMetrics();
     void updateTheme();
+    void polish();
+    void plan();
 
-    int estimateVisualLines(const QString &text, int columns) const;
-    int displayColumns(const QString &text) const;
-    qreal wrapWidth() const;
-    qreal textLeft() const;
-    qreal toPixel(qreal value) const;
+    int estimateVisualLines(const std::string &text, int columns) const;
+    int displayColumns(const std::string &text) const;
+    double wrapWidth() const;
+    double textLeft() const;
+    double toPixel(double value) const;
     LineCache *ensureLayout(int line);
     void buildLayout(int line, LineCache *cache, LineCache *previous = nullptr);
     void setLineVisualCount(int line, int count);
     void ensureIndex();
     void recountWidth();
     void dropFarCaches(int first, int last);
+    void computeExactHeights();
 
-    qreal lineTop(int line) const;
-    // Where the visual line containing `position` is, and its QTextLine.
-    bool locate(const TextPosition &position, LineCache **cache, const Segment **segment, QTextLine *textLine,
-                int *visual);
-    QRectF caretRect(const TextPosition &position);
-    TextPosition hitTest(const QPointF &point);
-    QList<QRectF> rangeRects(int line, LineCache *cache, int from, int to, bool toLineEnd);
+    double lineTop(int line) const;
+    bool locate(const TextPosition &position, LineCache **cache, const Segment **segment, int *textLine, int *visual);
+    cutefish::ui::RectF caretRect(const TextPosition &position);
+    TextPosition hitTest(cutefish::ui::PointF point);
+    std::vector<cutefish::ui::RectF> rangeRects(int line, LineCache *cache, int from, int to, bool toLineEnd);
     void addWhitespaceMarks(int line, LineCache *cache);
+    int columnInLayout(const LineCache *cache, const Segment &segment, const TextPosition &position) const;
 
     void moveCursor(const TextPosition &position, bool select, bool keepPreferredX = false);
     TextPosition moveVertically(const TextPosition &from, int lines);
     TextPosition visualLineEdge(const TextPosition &from, bool end);
     TextRange unitAt(const TextPosition &position) const;
     void selectByUnit(const TextPosition &position);
-    void startAutoScroll();
+    void autoScroll();
     void updatePrimarySelection();
     void resetBlink();
-    void applyScroll(qreal x, qreal y);
-    void typeText(const QString &text);
+    void applyScroll(double x, double y);
+    void updateScrollBars();
     void startTextDrag();
 
-    QPointer<Document> m_document;
-    QFont m_font;
+    Document *m_document = nullptr;
+    std::vector<cutefish::base::Subscription> m_connections;
+    cutefish::ui::FontSpec m_font;
+    std::shared_ptr<CodeFont> m_codeFont;
     bool m_wordWrap = true;
     bool m_lineNumbers = true;
     bool m_highlightCurrentLine = false;
@@ -260,74 +238,72 @@ private:
     bool m_autoIndent = true;
     bool m_overwrite = false;
     bool m_dark = false;
-    QColor m_accent = QColor(0x3385FF);
+    cutefish::ui::Color m_accent = cutefish::ui::Color::rgb(0x3385FF);
     SyntaxTheme m_theme;
-    QList<QTextCharFormat> m_formats;
-    qreal m_sidePadding = 12;
-    qreal m_occludedLeft = 0;
-    qreal m_occludedHeight = 0;
+    double m_sidePadding = 12;
+    double m_occludedLeft = 0;
+    double m_occludedHeight = 0;
 
-    qreal m_contentX = 0;
-    qreal m_contentY = 0;
-    qreal m_contentWidth = 0;
-    qreal m_contentHeight = 0;
+    double m_contentX = 0;
+    double m_contentY = 0;
+    double m_contentWidth = 0;
+    double m_contentHeight = 0;
 
-    qreal m_dpr = 1;
-    qreal m_lineHeight = 20;
-    qreal m_charWidth = 8;
-    qreal m_digitWidth = 8;
-    qreal m_ascent = 14;
-    qreal m_lineInset = 3;
+    double m_dpr = 1;
+    double m_lineHeight = 20;
+    double m_charWidth = 8;
+    double m_digitWidth = 8;
+    double m_spaceWidth = 8;
+    double m_ascent = 14;
+    double m_lineInset = 3;
     int m_maxColumns = 0;
     bool m_maxColumnsDirty = false;
-    qreal m_widestLaidOut = 0;
+    double m_widestLaidOut = 0;
+    double m_laidOutWidth = -1;
 
     std::vector<LineInfo> m_lines;
-    quint32 m_nextId = 1;
+    uint32_t m_nextId = 1;
     VisualLineIndex m_index;
     bool m_indexDirty = true;
-    std::unordered_map<quint32, std::unique_ptr<LineCache>> m_caches;
+    std::unordered_map<uint32_t, std::unique_ptr<LineCache>> m_caches;
     // Long lines just edited: their unchanged segments are reused.
-    std::unordered_map<quint32, std::unique_ptr<LineCache>> m_staleCaches;
-    quint64 m_nextVersion = 1;
-    QTimer m_exactTimer;
+    std::unordered_map<uint32_t, std::unique_ptr<LineCache>> m_staleCaches;
+    cutefish::base::Timer m_exactTimer;
     int m_exactCursor = 0;
 
+    bool m_planned = false;
     std::vector<PlannedLine> m_plan;
-    std::unordered_map<int, std::unique_ptr<QTextLayout>> m_numberLayouts;
-    QList<QRectF> m_selectionRects;
-    QList<QRectF> m_matchRects;
-    QList<QRectF> m_currentMatchRects;
-    QList<QRectF> m_bracketRects;
-    QList<QRectF> m_whitespaceRects;
-    QRectF m_currentLineRect;
-    QRectF m_caret;
-    QRectF m_dropCaret;
+    std::unordered_map<int, std::unique_ptr<CodeLayout>> m_numberLayouts;
+    std::vector<Rect> m_underlay;
+    cutefish::ui::RectF m_caret;
+    cutefish::ui::RectF m_dropCaret;
     int m_currentLineNumber = -1;
-    bool m_themeDirty = true;
 
     // The x the cursor keeps while moving up and down.
-    qreal m_preferredX = -1;
-    QString m_preedit;
-    QList<QInputMethodEvent::Attribute> m_preeditAttributes;
+    double m_preferredX = -1;
+    std::string m_preedit;
+    // Bytes into the preedit; negative hides the cursor.
     int m_preeditCursor = 0;
 
     bool m_caretVisible = true;
-    QBasicTimer m_blinkTimer;
-    QElapsedTimer m_blinkStarted;
-    QBasicTimer m_autoScrollTimer;
-    QPointF m_lastMouse;
+    cutefish::base::Timer m_blinkTimer;
+    cutefish::base::ElapsedTimer m_blinkStarted;
+    cutefish::base::Timer m_autoScrollTimer;
+    cutefish::ui::PointF m_lastMouse;
     bool m_selecting = false;
     int m_selectUnit = 0;
     TextRange m_unitAnchor;
-    QElapsedTimer m_lastClick;
-    QPointF m_lastClickPos;
-    int m_clickCount = 0;
+    cutefish::ui::PointF m_pressPos;
     bool m_maybeDrag = false;
-    QPointF m_pressPos;
     bool m_dragging = false;
-    QTimer m_primaryTimer;
-    QMetaObject::Connection m_windowConnection;
+    cutefish::base::Timer m_primaryTimer;
+    double m_pinch = 1;
+    double m_pinchAccumulated = 0;
+
+    std::unique_ptr<ScrollTarget> m_scrollTarget;
+    std::unique_ptr<cutefish::ui::Scroller> m_scroller;
+    cutefish::ui::ScrollBar *m_verticalBar;
+    cutefish::ui::ScrollBar *m_horizontalBar;
 };
 
 #endif

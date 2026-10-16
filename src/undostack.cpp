@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "undostack.h"
+#include "unicode.h"
 
 // A pause this long ends a typing run even within a word.
-static constexpr qint64 mergeInterval = 5000;
+static constexpr int64_t mergeInterval = 5000;
 
-static bool isSpace(QChar c)
+static bool startsWithSpace(const std::string &text)
 {
-    return c.isSpace();
+    return Unicode::isSpace(Unicode::at(text, 0));
+}
+
+static bool endsWithSpace(const std::string &text)
+{
+    return Unicode::isSpace(Unicode::before(text, text.size()));
 }
 
 void UndoStack::clear()
@@ -24,13 +30,13 @@ void UndoStack::begin(const Selection &before)
 {
     if (m_depth++ > 0)
         return;
-    m_groups.resize(m_index);
+    m_groups.resize(size_t(m_index));
     if (m_cleanIndex > m_index)
         m_cleanIndex = -1;
     UndoGroup group;
     group.before = before;
     group.after = before;
-    m_groups.append(group);
+    m_groups.push_back(std::move(group));
     ++m_index;
 }
 
@@ -38,44 +44,44 @@ void UndoStack::end(const Selection &after)
 {
     if (m_depth == 0 || --m_depth > 0)
         return;
-    UndoGroup &group = m_groups.last();
+    UndoGroup &group = m_groups.back();
     group.after = after;
     m_sealed = true;
     // Nothing was changed: drop the empty group.
-    if (group.steps.isEmpty()) {
-        m_groups.removeLast();
+    if (group.steps.empty()) {
+        m_groups.pop_back();
         --m_index;
     }
 }
 
-bool UndoStack::canMerge(const UndoGroup &group, const EditStep &step, UndoGroup::Kind kind, qint64 time) const
+bool UndoStack::canMerge(const UndoGroup &group, const EditStep &step, UndoGroup::Kind kind, int64_t time) const
 {
     if (m_sealed || group.kind != kind || kind == UndoGroup::Other || group.steps.size() != 1)
         return false;
     if (m_cleanIndex == m_index || time - group.time > mergeInterval)
         return false;
 
-    const EditStep &last = group.steps.last();
+    const EditStep &last = group.steps.back();
     switch (kind) {
     case UndoGroup::Typing:
-        if (!step.removed.isEmpty() || step.inserted.contains(QLatin1Char('\n')) || last.inserted.isEmpty())
+        if (!step.removed.empty() || step.inserted.find('\n') != std::string::npos || last.inserted.empty())
             return false;
         if (TextBuffer::endOf(last.at, last.inserted) != step.at)
             return false;
         // A new word starts a new group; the spaces before it stay with the last one.
-        return !(isSpace(last.inserted.back()) && !isSpace(step.inserted.front()));
+        return !(endsWithSpace(last.inserted) && !startsWithSpace(step.inserted));
     case UndoGroup::Backspace:
-        if (!step.inserted.isEmpty() || !last.inserted.isEmpty() || step.removed.contains(QLatin1Char('\n')))
+        if (!step.inserted.empty() || !last.inserted.empty() || step.removed.find('\n') != std::string::npos)
             return false;
         if (TextBuffer::endOf(step.at, step.removed) != last.at)
             return false;
-        return !(isSpace(step.removed.back()) && !isSpace(last.removed.front()));
+        return !(endsWithSpace(step.removed) && !startsWithSpace(last.removed));
     case UndoGroup::Delete:
-        if (!step.inserted.isEmpty() || !last.inserted.isEmpty() || step.removed.contains(QLatin1Char('\n')))
+        if (!step.inserted.empty() || !last.inserted.empty() || step.removed.find('\n') != std::string::npos)
             return false;
         if (step.at != last.at)
             return false;
-        return !(!isSpace(last.removed.back()) && isSpace(step.removed.front()));
+        return !(!endsWithSpace(last.removed) && startsWithSpace(step.removed));
     case UndoGroup::Other:
         break;
     }
@@ -83,25 +89,25 @@ bool UndoStack::canMerge(const UndoGroup &group, const EditStep &step, UndoGroup
 }
 
 void UndoStack::record(const EditStep &step, UndoGroup::Kind kind, const Selection &before,
-                       const Selection &after, qint64 time)
+                       const Selection &after, int64_t time)
 {
     if (m_depth > 0) {
-        m_groups.last().steps.append(step);
+        m_groups.back().steps.push_back(step);
         return;
     }
 
-    m_groups.resize(m_index);
+    m_groups.resize(size_t(m_index));
     if (m_cleanIndex > m_index)
         m_cleanIndex = -1;
 
-    if (!m_groups.isEmpty() && canMerge(m_groups.last(), step, kind, time)) {
-        UndoGroup &group = m_groups.last();
-        EditStep &last = group.steps.last();
+    if (!m_groups.empty() && canMerge(m_groups.back(), step, kind, time)) {
+        UndoGroup &group = m_groups.back();
+        EditStep &last = group.steps.back();
         if (kind == UndoGroup::Typing) {
             last.inserted += step.inserted;
         } else if (kind == UndoGroup::Backspace) {
             last.at = step.at;
-            last.removed.prepend(step.removed);
+            last.removed.insert(0, step.removed);
         } else {
             last.removed += step.removed;
         }
@@ -111,12 +117,12 @@ void UndoStack::record(const EditStep &step, UndoGroup::Kind kind, const Selecti
     }
 
     UndoGroup group;
-    group.steps.append(step);
+    group.steps.push_back(step);
     group.before = before;
     group.after = after;
     group.kind = kind;
     group.time = time;
-    m_groups.append(group);
+    m_groups.push_back(std::move(group));
     ++m_index;
     m_sealed = false;
 }
@@ -124,11 +130,11 @@ void UndoStack::record(const EditStep &step, UndoGroup::Kind kind, const Selecti
 const UndoGroup &UndoStack::undo()
 {
     m_sealed = true;
-    return m_groups.at(--m_index);
+    return m_groups[size_t(--m_index)];
 }
 
 const UndoGroup &UndoStack::redo()
 {
     m_sealed = true;
-    return m_groups.at(m_index++);
+    return m_groups[size_t(m_index++)];
 }

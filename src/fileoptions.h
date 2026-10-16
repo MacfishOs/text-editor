@@ -7,6 +7,9 @@
 #include "textcodec.h"
 
 #include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 // The properties of the .editorconfig files above a file.
 struct EditorConfig
@@ -14,16 +17,16 @@ struct EditorConfig
     std::optional<bool> insertSpaces;
     std::optional<int> indentSize;
     std::optional<int> tabWidth;
-    QByteArray charset;
+    std::string charset;
     bool charsetBom = false;
     std::optional<LineEnding> lineEnding;
     std::optional<bool> trimTrailingWhitespace;
     std::optional<bool> insertFinalNewline;
 
-    static EditorConfig forFile(const QString &path);
+    static EditorConfig forFile(const std::string &path);
     // One file's sections applied to `fileName`, relative to that file's directory.
-    void apply(const QString &configText, const QString &relativePath, bool *root);
-    static bool globMatches(const QString &glob, const QString &relativePath);
+    void apply(std::string_view configText, const std::string &relativePath, bool *root);
+    static bool globMatches(std::string_view glob, const std::string &relativePath);
 };
 
 struct Indentation
@@ -35,7 +38,7 @@ struct Indentation
 namespace FileOptions
 {
 // The indentation most lines use, or nothing when too few lines are indented.
-std::optional<Indentation> detectIndentation(const QList<QString> &lines);
+std::optional<Indentation> detectIndentation(const std::vector<std::string> &lines);
 }
 
 #endif

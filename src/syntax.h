@@ -4,12 +4,12 @@
 #ifndef SYNTAX_H
 #define SYNTAX_H
 
-#include <QList>
-#include <QSet>
-#include <QString>
-#include <QStringList>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
-enum class SyntaxStyle : quint8 {
+enum class SyntaxStyle : uint8_t {
     Normal,
     Keyword,
     Type,
@@ -38,6 +38,7 @@ enum class SyntaxStyle : quint8 {
     Count,
 };
 
+// UTF-8 byte offsets into the line.
 struct SyntaxSpan
 {
     int start;
@@ -52,18 +53,19 @@ namespace Syntax
 // Line states carried from one line to the next; 0 is the plain state.
 using State = int;
 
-const QList<const Language *> &languages();
-const Language *language(const QString &id);
-QString id(const Language *language);
-QString name(const QString &id);
+// Sorted by name.
+const std::vector<const Language *> &languages();
+const Language *language(std::string_view id);
+std::string id(const Language *language);
+std::string name(std::string_view id);
 
 // From the file name, then the first line (a shebang or an XML prolog),
 // then the MIME database. Empty for plain text.
-QString detect(const QString &fileName, const QString &firstLine);
+std::string detect(const std::string &fileName, std::string_view firstLine);
 
 // Colours `text` given the state at the end of the previous line, and
 // returns the state at the end of this one.
-State highlight(const Language *language, const QString &text, State state, QList<SyntaxSpan> *spans);
+State highlight(const Language *language, std::string_view text, State state, std::vector<SyntaxSpan> *spans);
 }
 
 #endif

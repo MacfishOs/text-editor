@@ -4,9 +4,9 @@
 #ifndef TEXTCODEC_H
 #define TEXTCODEC_H
 
-#include <QByteArray>
-#include <QList>
-#include <QString>
+#include <string>
+#include <string_view>
+#include <vector>
 
 enum class LineEnding {
     Unix,
@@ -16,9 +16,10 @@ enum class LineEnding {
 
 struct DecodedText
 {
-    QList<QString> lines;
-    // A name QStringDecoder accepts, e.g. "UTF-8", "UTF-16LE", "GB18030".
-    QByteArray encoding;
+    // UTF-8.
+    std::vector<std::string> lines;
+    // An ICU converter name, e.g. "UTF-8", "UTF-16LE", "GB18030".
+    std::string encoding;
     bool bom = false;
     LineEnding lineEnding = LineEnding::Unix;
     bool mixedLineEndings = false;
@@ -30,8 +31,7 @@ struct DecodedText
 
 struct EncodingInfo
 {
-    QByteArray name;
-    // Untranslated; translated with the "Encoding" context.
+    const char *name;
     const char *label;
 };
 
@@ -39,29 +39,31 @@ namespace TextCodec
 {
 // Guesses the encoding from a BOM, the UTF-16 NUL pattern, UTF-8 validity and
 // the byte statistics of the legacy encodings, preferring the locale's own.
-QByteArray detect(const QByteArray &data, bool *bom = nullptr);
+std::string detect(std::string_view data, bool *bom = nullptr);
 
 // Decodes with the given encoding, or the detected one when it is empty.
-DecodedText decode(const QByteArray &data, const QByteArray &encoding = QByteArray());
+DecodedText decode(std::string_view data, const std::string &encoding = std::string());
 
 // Joins the lines with the line ending and encodes them; lossy is set when a
 // character has no representation in the encoding.
-QByteArray encode(const QList<QString> &lines, const QByteArray &encoding, bool bom,
-                  LineEnding lineEnding, bool *lossy = nullptr);
+std::string encode(const std::vector<std::string> &lines, const std::string &encoding, bool bom,
+                   LineEnding lineEnding, bool *lossy = nullptr);
 
-bool isBinary(const QByteArray &data);
-bool isSupported(const QByteArray &encoding);
+bool isBinary(std::string_view data);
+bool isSupported(const std::string &encoding);
 
 // Splits at \n, \r\n and lone \r, and reports which of them the text uses most.
-QList<QString> splitLines(QStringView text, LineEnding *dominant = nullptr, bool *mixed = nullptr);
+std::vector<std::string> splitLines(std::string_view text, LineEnding *dominant = nullptr, bool *mixed = nullptr);
 
-QString lineEndingText(LineEnding lineEnding);
+std::string_view lineEndingText(LineEnding lineEnding);
 
 // The legacy encoding text in the system locale's language most likely uses.
-QByteArray localeEncoding();
+std::string localeEncoding();
+// The same for a locale name such as "zh_TW".
+std::string localeEncoding(const std::string &localeName);
 
 // What the encoding menu offers, in display order.
-const QList<EncodingInfo> &encodings();
+const std::vector<EncodingInfo> &encodings();
 }
 
 #endif

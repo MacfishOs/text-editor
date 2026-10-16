@@ -4,26 +4,27 @@
 #ifndef SESSION_H
 #define SESSION_H
 
-#include <QList>
-#include <QSet>
-#include <QString>
+#include <set>
+#include <string>
+#include <vector>
 
 struct TabState
 {
-    QString path;
-    QString draftId;
+    std::string path;
+    std::string draftId;
     // The text in the draft is the document's, not the file's.
     bool unsaved = false;
     int line = 0;
+    // A UTF-8 byte offset into the line.
     int column = 0;
     double scroll = 0;
-    QString encoding;
-    QString language;
+    std::string encoding;
+    std::string language;
 };
 
 struct WindowState
 {
-    QList<TabState> tabs;
+    std::vector<TabState> tabs;
     int current = 0;
 };
 
@@ -31,16 +32,21 @@ struct WindowState
 // they come back after a restart or a crash.
 namespace Session
 {
-QString defaultPath();
+// The folder session.json and the drafts live in:
+// ~/.local/share/cutefish-text-editor, or another one set for tests.
+std::string dataDirectory();
+void setDataDirectory(const std::string &directory);
+std::string defaultPath();
 
-bool save(const QList<WindowState> &windows, const QString &path = defaultPath());
+bool save(const std::vector<WindowState> &windows, const std::string &path = defaultPath());
 // `ok` is false when the file exists but cannot be read or parsed.
-QList<WindowState> load(const QString &path = defaultPath(), bool *ok = nullptr);
-void remove(const QString &path = defaultPath());
+std::vector<WindowState> load(const std::string &path = defaultPath(), bool *ok = nullptr);
+void remove(const std::string &path = defaultPath());
 
 // Deletes drafts no tab refers to any more, once they are older than
-// `minimumAgeDays`: a draft of a closed tab may still be wanted.
-void removeOrphanDrafts(const QString &directory, const QSet<QString> &keep, int minimumAgeDays = 0);
+// `minimumAgeDays`: a draft of a closed tab may still be wanted. Unfinished
+// temporary drafts from before this process started go as well.
+void removeOrphanDrafts(const std::string &directory, const std::set<std::string> &keep, int minimumAgeDays = 0);
 }
 
 #endif

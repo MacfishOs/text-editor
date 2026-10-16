@@ -4,9 +4,8 @@
 #ifndef SEARCHER_H
 #define SEARCHER_H
 
+#include "regexp.h"
 #include "textbuffer.h"
-
-#include <QRegularExpression>
 
 // Finds a pattern line by line: plain text, whole words or a regular
 // expression. A match never spans a line break.
@@ -20,15 +19,15 @@ public:
         bool regularExpression = false;
     };
 
-    void setPattern(const QString &pattern, const Options &options);
-    const QString &pattern() const { return m_pattern; }
+    void setPattern(const std::string &pattern, const Options &options);
+    const std::string &pattern() const { return m_pattern; }
     const Options &options() const { return m_options; }
-    bool isEmpty() const { return m_pattern.isEmpty(); }
-    bool isValid() const { return !m_pattern.isEmpty() && m_expression.isValid(); }
-    QString errorString() const;
+    bool isEmpty() const { return m_pattern.empty(); }
+    bool isValid() const { return !m_pattern.empty() && m_expression.isValid(); }
+    std::string errorString() const;
 
     // Matches within one line, in order, limited to [from, to).
-    QList<TextRange> matchesInLine(const QString &text, int line, int from = 0, int to = -1) const;
+    std::vector<TextRange> matchesInLine(const std::string &text, int line, int from = 0, int to = -1) const;
 
     // The next match at or after `from` (forwards) or ending at or before it
     // (backwards), inside `scope` when it is not empty. Wraps around the
@@ -42,16 +41,14 @@ public:
 
     // What the match at `range` is replaced with: captures expand for
     // regular expressions (\1 or $1, \n and \t too).
-    QString replacement(const TextBuffer &buffer, const TextRange &range, const QString &replace) const;
+    std::string replacement(const TextBuffer &buffer, const TextRange &range, const std::string &replace) const;
 
     static bool isNotFound(const TextRange &range) { return range.start.line < 0; }
 
 private:
-    QRegularExpressionMatch matchAt(const QString &text, int from) const;
-
-    QString m_pattern;
+    std::string m_pattern;
     Options m_options;
-    QRegularExpression m_expression;
+    RegExp m_expression;
 };
 
 #endif

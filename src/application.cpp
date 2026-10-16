@@ -3,321 +3,269 @@
 
 #include "application.h"
 #include "document.h"
-#include "preferences.h"
+#include "editorsettings.h"
 #include "syntax.h"
 #include "textcodec.h"
 
-#include <QClipboard>
-#include <QCoreApplication>
-#include <QDBusConnection>
-#include <QDBusMessage>
-#include <QDBusPendingCall>
-#include <QDir>
-#include <QFileInfo>
-#include <QFontDatabase>
-#include <QGuiApplication>
-#include <QQmlComponent>
-#include <QQmlContext>
-#include <QQmlEngine>
-#include <QQuickWindow>
-#include <QUrl>
+#include "base/dbus.h"
+#include "base/event_loop.h"
+#include "base/strings.h"
+#include "base/url.h"
+#include "ui/application.h"
+#include "ui/clipboard.h"
+#include "ui/window.h"
 
-static constexpr int closedTabLimit = 20;
+#include <algorithm>
+#include <filesystem>
 
-// QWindow::show() is showNormal(), which would take a maximized window out of its state.
-static void present(QQuickWindow *window)
+using namespace std::chrono_literals;
+namespace fs = std::filesystem;
+namespace strings = cutefish::base::strings;
+namespace dbus = cutefish::base::dbus;
+
+static constexpr size_t closedTabLimit = 20;
+static constexpr const char *serviceName = "com.cutefish.TextEditor";
+static constexpr const char *servicePath = "/TextEditor";
+
+// Shown as it is, so a maximized window stays maximized.
+static void present(EditorWindow *window)
 {
-    if (!window->isVisible())
-        window->setVisible(true);
-    else if (window->windowStates() & Qt::WindowMinimized)
-        window->setWindowStates(window->windowStates() & ~Qt::WindowMinimized);
-    window->raise();
-    window->requestActivate();
+    if (!window)
+        return;
+    window->window().show();
+    window->window().activate();
 }
 
-Application::Application(QQmlEngine *engine, QObject *parent)
-    : QObject(parent)
-    , m_engine(engine)
-    , m_recentFiles(Preferences::ownFile())
+EditorApplication::EditorApplication(EditorSettings &settings)
+    : m_settings(settings)
+    , m_recentFiles(settings.path())
 {
     m_sessionTimer.setSingleShot(true);
-    m_sessionTimer.setInterval(1000);
-    connect(&m_sessionTimer, &QTimer::timeout, this, &Application::saveSession);
+    m_sessionTimer.setInterval(1000ms);
+    m_sessionTimer.onTimeout = [this] { saveSession(); };
 
-    Document::setRecentFilesHook([this](const QString &path) {
-        m_recentFiles.add(path);
-    });
-
-    // The windows stay: aboutToQuit can run inside one of their QML handlers
-    // (quitting from onClosing), which must not see its window deleted.
-    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
-        if (!m_quitting)
-            saveSession();
-        m_quitting = true;
-    });
+    Document::setRecentFilesHook([this](const std::string &path) { m_recentFiles.add(path); });
 }
 
-Application::~Application()
+EditorApplication::~EditorApplication()
 {
-    // After the event loop, before the engine their QML runs on.
-    for (const QPointer<QQuickWindow> &window : std::as_const(m_windows))
-        delete window.data();
     Document::setRecentFilesHook(nullptr);
+    m_service.reset();
+    m_order.clear();
+    m_windows.clear();
 }
 
-QFont Application::systemFont() const
+static const std::vector<cutefish::ui::FontFamily> &families()
 {
-    return QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    static const std::vector<cutefish::ui::FontFamily> list = cutefish::ui::fontFamilies();
+    return list;
 }
 
-QStringList Application::monospaceFamilies() const
+std::vector<std::string> EditorApplication::monospaceFamilies() const
 {
-    QStringList result;
-    for (const QString &family : QFontDatabase::families()) {
-        if (QFontDatabase::isFixedPitch(family) && !QFontDatabase::isPrivateFamily(family))
-            result.append(family);
+    std::vector<std::string> result;
+    for (const cutefish::ui::FontFamily &family : families()) {
+        if (family.fixedPitch && !strings::startsWith(family.name, "."))
+            result.push_back(family.name);
     }
     return result;
 }
 
-QVariantList Application::encodings() const
-{
-    QVariantList result;
-    for (const EncodingInfo &info : TextCodec::encodings()) {
-        if (!TextCodec::isSupported(info.name))
-            continue;
-        result.append(QVariantMap{{QStringLiteral("name"), QString::fromLatin1(info.name)},
-                                  {QStringLiteral("label"), QCoreApplication::translate("Encoding", info.label)}});
-    }
-    return result;
-}
-
-QString Application::encodingLabel(const QString &encoding) const
+std::string EditorApplication::encodingLabel(const std::string &encoding)
 {
     for (const EncodingInfo &info : TextCodec::encodings()) {
-        if (QString::fromLatin1(info.name) == encoding)
-            return QCoreApplication::translate("Encoding", info.label);
+        if (encoding == info.name)
+            return info.label;
     }
     return encoding;
 }
 
-QVariantList Application::languages() const
+std::vector<std::pair<std::string, std::string>> EditorApplication::languages() const
 {
-    QVariantList result;
-    result.append(QVariantMap{{QStringLiteral("id"), QString()},
-                              {QStringLiteral("name"), Syntax::name(QString())}});
+    std::vector<std::pair<std::string, std::string>> result{{std::string(), Syntax::name({})}};
     for (const Language *language : Syntax::languages()) {
-        const QString id = Syntax::id(language);
-        result.append(QVariantMap{{QStringLiteral("id"), id}, {QStringLiteral("name"), Syntax::name(id)}});
+        const std::string id = Syntax::id(language);
+        result.emplace_back(id, Syntax::name(id));
     }
     return result;
 }
 
-Document *Application::createDocument(QObject *owner, const QString &draftId)
+int EditorApplication::windowCount() const
 {
-    auto *document = new Document(owner, draftId);
-    QQmlEngine::setObjectOwnership(document, QQmlEngine::CppOwnership);
-    connect(document, &Document::filePathChanged, this, &Application::scheduleSessionSave);
-    connect(document, &Document::modifiedChanged, this, &Application::scheduleSessionSave);
-    return document;
+    return int(m_windows.size());
 }
 
-QQuickWindow *Application::newWindow(const QVariantMap &properties)
+std::vector<EditorWindow *> EditorApplication::windows() const
 {
-    if (!m_component)
-        m_component = new QQmlComponent(m_engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")), this);
-    QObject *object = m_component->createWithInitialProperties(properties, m_engine->rootContext());
-    auto *window = qobject_cast<QQuickWindow *>(object);
-    if (!window) {
-        qWarning().noquote() << "Cannot create a text editor window:" << m_component->errorString();
-        delete object;
-        return nullptr;
-    }
-    QQmlEngine::setObjectOwnership(window, QQmlEngine::CppOwnership);
-    m_windows.removeAll(nullptr);
-    m_windows.append(window);
-    m_lastActive = window;
-    connect(window, &QWindow::activeChanged, this, [this, window] {
-        if (window->isActive())
-            windowActivated(window);
-    });
-    emit windowCountChanged();
+    return m_order;
+}
+
+EditorWindow *EditorApplication::newWindow(EditorWindow::Options options)
+{
+    auto window = std::make_unique<EditorWindow>(*this, std::move(options));
+    EditorWindow *raw = window.get();
+    m_windows.push_back(std::move(window));
+    m_order.push_back(raw);
+    m_lastActive = raw;
+    raw->window().show();
+    windowCountChanged();
     scheduleSessionSave();
-    return window;
+    return raw;
 }
 
-void Application::releaseWindow(QQuickWindow *window)
+void EditorApplication::releaseWindow(EditorWindow *window)
 {
-    if (!window)
+    std::erase(m_order, window);
+    if (m_lastActive == window)
+        m_lastActive = m_order.empty() ? nullptr : m_order.back();
+    const auto it = std::find_if(m_windows.begin(), m_windows.end(),
+                                 [window](const std::unique_ptr<EditorWindow> &w) { return w.get() == window; });
+    if (it == m_windows.end())
         return;
-    m_windows.removeAll(window);
-    m_windows.removeAll(nullptr);
-    window->deleteLater();
-    emit windowCountChanged();
+    // Destroyed after the event it closed in, which may be one of its own.
+    std::shared_ptr<EditorWindow> doomed(std::move(*it));
+    m_windows.erase(it);
+    cutefish::base::EventLoop::current()->post([doomed] {});
+    windowCountChanged();
     scheduleSessionSave();
 }
 
-void Application::windowActivated(QQuickWindow *window)
+void EditorApplication::windowActivated(EditorWindow *window)
 {
     m_lastActive = window;
     // The window brought forward is the one that comes back in front.
-    m_windows.removeAll(window);
-    m_windows.append(window);
+    std::erase(m_order, window);
+    m_order.push_back(window);
 }
 
-QVariantList Application::windowList() const
-{
-    QVariantList result;
-    for (QQuickWindow *window : windows())
-        result.append(QVariant::fromValue(window));
-    return result;
-}
-
-int Application::windowCount() const
-{
-    return int(windows().size());
-}
-
-QList<QQuickWindow *> Application::windows() const
-{
-    QList<QQuickWindow *> result;
-    for (const QPointer<QQuickWindow> &window : m_windows) {
-        if (window)
-            result.append(window);
-    }
-    return result;
-}
-
-QQuickWindow *Application::targetWindow(QQuickWindow *preferred)
+EditorWindow *EditorApplication::targetWindow(EditorWindow *preferred)
 {
     if (preferred)
         return preferred;
-    if (m_lastActive && m_lastActive->isVisible())
+    if (m_lastActive && !m_lastActive->window().isHidden())
         return m_lastActive;
-    const QList<QQuickWindow *> all = windows();
-    for (auto it = all.crbegin(); it != all.crend(); ++it) {
-        if ((*it)->isVisible())
+    for (auto it = m_order.rbegin(); it != m_order.rend(); ++it) {
+        if (!(*it)->window().isHidden())
             return *it;
     }
     return newWindow();
 }
 
-QVariantMap Application::findOpenDocument(const QString &path) const
+std::optional<EditorApplication::OpenDocument> EditorApplication::findOpenDocument(const std::string &path) const
 {
-    const QString absolute = QFileInfo(path).absoluteFilePath();
-    const QString canonical = QFileInfo(path).canonicalFilePath();
-    for (QQuickWindow *window : windows()) {
-        QVariant index;
-        QMetaObject::invokeMethod(window, "indexOfPath", Q_RETURN_ARG(QVariant, index), Q_ARG(QVariant, absolute),
-                                  Q_ARG(QVariant, canonical));
-        if (index.toInt() >= 0)
-            return {{QStringLiteral("window"), QVariant::fromValue(window)}, {QStringLiteral("index"), index}};
+    std::error_code error;
+    const std::string absolute = fs::absolute(path, error).lexically_normal().string();
+    const fs::path canonicalPath = fs::canonical(path, error);
+    const std::string canonical = error ? std::string() : canonicalPath.string();
+    for (EditorWindow *window : m_order) {
+        const int index = window->indexOfPath(absolute, canonical);
+        if (index >= 0)
+            return OpenDocument{window, index};
     }
-    return {};
+    return std::nullopt;
 }
 
-void Application::openPaths(const QStringList &paths, int line, QQuickWindow *preferred)
+void EditorApplication::openPaths(const std::vector<std::string> &paths, int line, EditorWindow *preferred)
 {
-    QQuickWindow *window = nullptr;
-    for (const QString &path : paths) {
-        const QVariantMap open = findOpenDocument(path);
-        QQuickWindow *target = open.isEmpty() ? targetWindow(preferred) : open.value(QStringLiteral("window")).value<QQuickWindow *>();
+    EditorWindow *window = nullptr;
+    for (const std::string &path : paths) {
+        const std::optional<OpenDocument> open = findOpenDocument(path);
+        EditorWindow *target = open ? open->window : targetWindow(preferred);
         if (!target)
             continue;
-        QMetaObject::invokeMethod(target, "openFile", Q_ARG(QVariant, QFileInfo(path).absoluteFilePath()),
-                                  Q_ARG(QVariant, line));
+        std::error_code error;
+        target->openFile(fs::absolute(path, error).lexically_normal().string(), line);
         window = target;
     }
     if (window)
         present(window);
 }
 
-void Application::openText(const QString &text)
+void EditorApplication::openText(const std::string &text)
 {
-    QQuickWindow *window = targetWindow();
+    EditorWindow *window = targetWindow();
     if (!window)
         return;
-    QMetaObject::invokeMethod(window, "openText", Q_ARG(QVariant, text));
+    window->openText(text);
     present(window);
 }
 
-void Application::Open(const QStringList &arguments, const QString &workingDirectory)
+void EditorApplication::open(const std::vector<std::string> &arguments, const std::string &workingDirectory)
 {
-    const QDir dir(workingDirectory.isEmpty() ? QDir::currentPath() : workingDirectory);
+    std::error_code error;
+    const fs::path directory = workingDirectory.empty() ? fs::current_path(error) : fs::path(workingDirectory);
     int line = 0;
-    QStringList pending;
+    std::vector<std::string> pending;
     bool any = false;
-    for (const QString &argument : arguments) {
+    for (const std::string &argument : arguments) {
         // "+42" applies to the files after it, as in other editors.
-        if (argument.startsWith(QLatin1Char('+')) && argument.size() > 1) {
-            bool ok = false;
-            const int value = argument.mid(1).toInt(&ok);
-            if (ok) {
-                if (!pending.isEmpty())
+        if (argument.size() > 1 && argument[0] == '+') {
+            if (const std::optional<int> value = strings::toNumber<int>(std::string_view(argument).substr(1))) {
+                if (!pending.empty())
                     openPaths(pending, line);
                 pending.clear();
-                line = value;
+                line = *value;
                 continue;
             }
         }
-        const QUrl url(argument);
-        const QString path = url.isLocalFile() ? url.toLocalFile() : dir.absoluteFilePath(argument);
-        pending.append(path);
+        const std::optional<std::string> local = cutefish::base::url::isLocalFile(argument)
+                ? cutefish::base::url::toLocalFile(argument)
+                : std::nullopt;
+        pending.push_back(local ? *local : (directory / argument).lexically_normal().string());
         any = true;
     }
-    if (!pending.isEmpty())
+    if (!pending.empty())
         openPaths(pending, line);
-    if (!any) {
-        QQuickWindow *window = targetWindow();
-        if (window)
-            present(window);
-    }
+    if (!any)
+        present(targetWindow());
 }
 
-void Application::OpenText(const QString &text)
+void EditorApplication::newWindowFromBus()
 {
-    openText(text);
+    EditorWindow *window = newWindow();
+    window->window().activate();
 }
 
-void Application::NewWindow()
+bool EditorApplication::registerService()
 {
-    QQuickWindow *window = newWindow();
-    if (window)
-        window->requestActivate();
+    dbus::Connection *bus = dbus::Connection::session();
+    if (!bus)
+        return true;
+    if (!bus->requestName(serviceName))
+        return false;
+    m_service = std::make_unique<dbus::Object>(bus, servicePath, serviceName);
+    m_service->addMethod("Open", [this](std::vector<std::string> arguments, std::string workingDirectory) {
+        open(arguments, workingDirectory);
+    });
+    m_service->addMethod("OpenText", [this](std::string text) { openText(text); });
+    m_service->addMethod("NewWindow", [this]() { newWindowFromBus(); });
+    m_service->publish();
+    return true;
 }
 
-void Application::start(const QStringList &arguments, const QString &workingDirectory, const QString &standardInput)
+void EditorApplication::start(const std::vector<std::string> &arguments, const std::string &workingDirectory,
+                        const std::optional<std::string> &standardInput)
 {
     // With restoring off the session is removed on a clean quit, so one that
     // is still there was left by a crash and comes back anyway.
     restore();
-    if (!arguments.isEmpty())
-        Open(arguments, workingDirectory);
-    if (!standardInput.isNull())
-        openText(standardInput);
-    if (windows().isEmpty())
+    if (!arguments.empty())
+        open(arguments, workingDirectory);
+    if (standardInput)
+        openText(*standardInput);
+    if (m_windows.empty())
         newWindow();
 }
 
-void Application::restore()
+void EditorApplication::restore()
 {
     bool ok = true;
-    const QList<WindowState> session = Session::load(Session::defaultPath(), &ok);
+    const std::vector<WindowState> session = Session::load(Session::defaultPath(), &ok);
     for (const WindowState &state : session) {
-        QVariantList tabs;
-        for (const TabState &tab : state.tabs) {
-            tabs.append(QVariantMap{
-                    {QStringLiteral("path"), tab.path},
-                    {QStringLiteral("draftId"), tab.draftId},
-                    {QStringLiteral("unsaved"), tab.unsaved},
-                    {QStringLiteral("line"), tab.line},
-                    {QStringLiteral("column"), tab.column},
-                    {QStringLiteral("scroll"), tab.scroll},
-                    {QStringLiteral("encoding"), tab.encoding},
-                    {QStringLiteral("language"), tab.language},
-            });
-        }
-        newWindow({{QStringLiteral("initialTabs"), tabs}, {QStringLiteral("initialIndex"), state.current}});
+        EditorWindow::Options options;
+        options.initialTabs = state.tabs;
+        options.initialIndex = state.current;
+        newWindow(std::move(options));
     }
     // Drafts nothing refers to are left over from a closed tab or a crash;
     // they are kept a week, and all of them when the session is unreadable.
@@ -325,133 +273,104 @@ void Application::restore()
         Session::removeOrphanDrafts(Document::draftDirectory(), liveDraftIds(), 7);
 }
 
-QSet<QString> Application::liveDraftIds() const
+std::set<std::string> EditorApplication::liveDraftIds() const
 {
-    QSet<QString> ids;
+    std::set<std::string> ids;
     for (const WindowState &state : Session::load()) {
         for (const TabState &tab : state.tabs)
             ids.insert(tab.draftId);
     }
-    for (const QVariantMap &closed : m_closedTabs)
-        ids.insert(closed.value(QStringLiteral("draftId")).toString());
+    for (const TabState &closed : m_closedTabs)
+        ids.insert(closed.draftId);
     return ids;
 }
 
-void Application::pushClosedTab(const QVariantMap &state)
+void EditorApplication::pushClosedTab(const TabState &state)
 {
-    m_closedTabs.append(state);
+    m_closedTabs.push_back(state);
     while (m_closedTabs.size() > closedTabLimit) {
-        const QVariantMap dropped = m_closedTabs.takeFirst();
-        if (dropped.value(QStringLiteral("unsaved")).toBool())
-            QFile::remove(Document::draftDirectory() + QLatin1Char('/') + dropped.value(QStringLiteral("draftId")).toString()
-                          + QLatin1String(".txt"));
+        const TabState dropped = m_closedTabs.front();
+        m_closedTabs.erase(m_closedTabs.begin());
+        if (dropped.unsaved) {
+            std::error_code error;
+            fs::remove(Document::draftDirectory() + "/" + dropped.draftId + ".txt", error);
+        }
     }
-    emit closedTabsChanged();
+    closedTabsChanged();
 }
 
-QVariantMap Application::takeClosedTab()
+std::optional<TabState> EditorApplication::takeClosedTab()
 {
-    if (m_closedTabs.isEmpty())
-        return {};
-    const QVariantMap state = m_closedTabs.takeLast();
-    emit closedTabsChanged();
+    if (m_closedTabs.empty())
+        return std::nullopt;
+    TabState state = m_closedTabs.back();
+    m_closedTabs.pop_back();
+    closedTabsChanged();
     return state;
 }
 
-void Application::scheduleSessionSave()
+void EditorApplication::scheduleSessionSave()
 {
     if (!m_quitting)
         m_sessionTimer.start();
 }
 
-void Application::saveSession()
+void EditorApplication::saveSession()
 {
     m_sessionTimer.stop();
-    QList<WindowState> session;
-    for (QQuickWindow *window : windows()) {
-        if (!window->isVisible())
+    std::vector<WindowState> session;
+    for (EditorWindow *window : m_order) {
+        if (window->window().isHidden())
             continue;
-        QVariant tabs;
-        QVariant current;
-        QMetaObject::invokeMethod(window, "sessionTabs", Q_RETURN_ARG(QVariant, tabs));
-        QMetaObject::invokeMethod(window, "sessionCurrentIndex", Q_RETURN_ARG(QVariant, current));
         WindowState state;
-        state.current = current.toInt();
-        for (const QVariant &value : tabs.toList()) {
-            const QVariantMap map = value.toMap();
-            TabState tab;
-            tab.path = map.value(QStringLiteral("path")).toString();
-            tab.draftId = map.value(QStringLiteral("draftId")).toString();
-            tab.unsaved = map.value(QStringLiteral("unsaved")).toBool();
-            tab.line = map.value(QStringLiteral("line")).toInt();
-            tab.column = map.value(QStringLiteral("column")).toInt();
-            tab.scroll = map.value(QStringLiteral("scroll")).toDouble();
-            tab.encoding = map.value(QStringLiteral("encoding")).toString();
-            tab.language = map.value(QStringLiteral("language")).toString();
-            state.tabs.append(tab);
-        }
-        session.append(state);
+        state.tabs = window->sessionTabs();
+        state.current = window->currentIndex();
+        session.push_back(std::move(state));
     }
     Session::save(session);
 }
 
-void Application::flushDrafts()
+void EditorApplication::flushDrafts()
 {
     // Every unsaved text goes to its draft before the session points at it.
-    for (QQuickWindow *window : windows()) {
-        for (Document *document : window->findChildren<Document *>())
-            document->writeDraftNow();
+    for (EditorWindow *window : m_order) {
+        for (EditorPage *page : window->pages())
+            page->document().writeDraftNow();
     }
 }
 
-void Application::terminate()
+void EditorApplication::terminate()
 {
     flushDrafts();
     saveSession();
     m_quitting = true;
-    QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
+    cutefish::base::EventLoop::current()->post([] { cutefish::ui::Application::instance()->quit(); });
 }
 
-void Application::quit()
+void EditorApplication::quit()
 {
     flushDrafts();
     saveSession();
-    if (!m_restoreSession) {
+    if (!m_settings.restoreSession) {
         // Asked and answered already: nothing comes back next time.
         Session::remove();
         Session::removeOrphanDrafts(Document::draftDirectory(), {});
     }
     m_quitting = true;
-    // Later: this is called from QML handlers of the windows quitting closes.
-    QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
+    // Later: this is called from handlers of the windows quitting closes.
+    cutefish::base::EventLoop::current()->post([] { cutefish::ui::Application::instance()->quit(); });
 }
 
-void Application::showInFileManager(const QString &path) const
+void EditorApplication::showInFileManager(const std::string &path) const
 {
-    QDBusMessage message = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.FileManager1"),
-                                                          QStringLiteral("/org/freedesktop/FileManager1"),
-                                                          QStringLiteral("org.freedesktop.FileManager1"),
-                                                          QStringLiteral("ShowItems"));
-    message << QStringList{QUrl::fromLocalFile(path).toString()} << QString();
-    QDBusConnection::sessionBus().asyncCall(message);
+    dbus::Connection *bus = dbus::Connection::session();
+    if (!bus)
+        return;
+    dbus::Proxy proxy(bus, "org.freedesktop.FileManager1", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1");
+    proxy.send("ShowItems", std::vector<std::string>{cutefish::base::url::fromLocalFile(path)}, std::string());
 }
 
-void Application::copyText(const QString &text) const
+void EditorApplication::copyText(const std::string &text) const
 {
-    QGuiApplication::clipboard()->setText(text);
-}
-
-QString Application::urlToPath(const QUrl &url) const
-{
-    return url.isLocalFile() ? url.toLocalFile() : url.toString();
-}
-
-QUrl Application::pathToUrl(const QString &path) const
-{
-    return QUrl::fromLocalFile(path);
-}
-
-bool Application::fileExists(const QString &path) const
-{
-    return QFileInfo::exists(path);
+    cutefish::ui::Clipboard::setText(text);
 }

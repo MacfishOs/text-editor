@@ -2,11 +2,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "syntax.h"
+#include "regexp.h"
+#include "unicode.h"
 
-#include <QCoreApplication>
-#include <QFileInfo>
-#include <QMimeDatabase>
-#include <QRegularExpression>
+#include "base/locale.h"
+#include "base/mime_database.h"
+#include "base/strings.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <fnmatch.h>
+#include <unordered_set>
+#include <utility>
+
+namespace strings = cutefish::base::strings;
+
+struct WordHash
+{
+    using is_transparent = void;
+    size_t operator()(std::string_view word) const { return std::hash<std::string_view>{}(word); }
+};
+
+using WordSet = std::unordered_set<std::string, WordHash, std::equal_to<>>;
 
 struct Language
 {
@@ -21,19 +38,19 @@ struct Language
         Log,
     };
 
-    QString id;
+    std::string id;
     const char *name;
     Kind kind = Code;
-    QStringList patterns;
-    QStringList interpreters;
-    QStringList mimeTypes;
-    QStringList lineComments;
-    QList<QPair<QString, QString>> blockComments;
-    QString quotes;
-    QStringList multilineQuotes;
-    QSet<QString> keywords;
-    QSet<QString> types;
-    QSet<QString> constants;
+    std::vector<std::string> patterns;
+    std::vector<std::string> interpreters;
+    std::vector<std::string> mimeTypes;
+    std::vector<std::string> lineComments;
+    std::vector<std::pair<std::string, std::string>> blockComments;
+    std::string quotes;
+    std::vector<std::string> multilineQuotes;
+    WordSet keywords;
+    WordSet types;
+    WordSet constants;
     bool caseInsensitive = false;
     bool hashPreprocessor = false;
     bool dollarVariables = false;
@@ -42,181 +59,187 @@ struct Language
     bool functions = true;
 };
 
-static QSet<QString> words(const char *list)
+static WordSet words(const char *list)
 {
-    QSet<QString> result;
-    for (const QString &word : QString::fromLatin1(list).split(QLatin1Char(' '), Qt::SkipEmptyParts))
-        result.insert(word);
+    WordSet result;
+    for (std::string &word : strings::split(list, ' ', strings::SplitBehavior::SkipEmptyParts))
+        result.insert(std::move(word));
     return result;
 }
 
-static QList<Language> makeLanguages()
+static void addWords(WordSet &set, const char *list)
 {
-    QList<Language> list;
-    const QPair<QString, QString> cComment{QStringLiteral("/*"), QStringLiteral("*/")};
-    const QStringList slashes{QStringLiteral("//")};
-    const QStringList hash{QStringLiteral("#")};
-    const QSet<QString> cTypes = words("void bool char short int long float double signed unsigned auto size_t ssize_t "
+    WordSet more = words(list);
+    set.merge(more);
+}
+
+static std::vector<Language> makeLanguages()
+{
+    std::vector<Language> list;
+    const std::pair<std::string, std::string> cComment{"/*", "*/"};
+    const std::vector<std::string> slashes{"//"};
+    const std::vector<std::string> hash{"#"};
+    const WordSet cTypes = words("void bool char short int long float double signed unsigned auto size_t ssize_t "
                                        "int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t wchar_t "
                                        "char8_t char16_t char32_t intptr_t uintptr_t ptrdiff_t FILE");
 
     {
         Language l;
-        l.id = QStringLiteral("c");
-        l.name = QT_TRANSLATE_NOOP("Language", "C");
-        l.patterns = {QStringLiteral("*.c"), QStringLiteral("*.h")};
-        l.mimeTypes = {QStringLiteral("text/x-csrc"), QStringLiteral("text/x-chdr")};
+        l.id = "c";
+        l.name = "C";
+        l.patterns = {"*.c", "*.h"};
+        l.mimeTypes = {"text/x-csrc", "text/x-chdr"};
         l.lineComments = slashes;
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"'");
+        l.quotes = "\"'";
         l.keywords = words("break case const continue default do else enum extern for goto if inline register restrict "
                            "return sizeof static struct switch typedef union volatile while _Bool _Atomic _Generic "
                            "_Noreturn _Static_assert _Thread_local alignas alignof static_assert thread_local typeof");
         l.types = cTypes;
         l.constants = words("NULL true false EOF stdin stdout stderr nullptr");
         l.hashPreprocessor = true;
-        list.append(l);
+        list.push_back(l);
     }
     {
-        Language l = list.last();
-        l.id = QStringLiteral("cpp");
-        l.name = QT_TRANSLATE_NOOP("Language", "C++");
-        l.patterns = {QStringLiteral("*.cpp"), QStringLiteral("*.cc"), QStringLiteral("*.cxx"), QStringLiteral("*.c++"),
-                      QStringLiteral("*.hpp"), QStringLiteral("*.hh"), QStringLiteral("*.hxx"), QStringLiteral("*.h++"),
-                      QStringLiteral("*.ipp"), QStringLiteral("*.tpp"), QStringLiteral("*.inl")};
-        l.mimeTypes = {QStringLiteral("text/x-c++src"), QStringLiteral("text/x-c++hdr")};
-        l.keywords += words("alignas and asm catch class co_await co_return co_yield concept consteval constexpr constinit "
+        Language l = list.back();
+        l.id = "cpp";
+        l.name = "C++";
+        l.patterns = {"*.cpp", "*.cc", "*.cxx", "*.c++",
+                      "*.hpp", "*.hh", "*.hxx", "*.h++",
+                      "*.ipp", "*.tpp", "*.inl"};
+        l.mimeTypes = {"text/x-c++src", "text/x-c++hdr"};
+        addWords(l.keywords, "alignas and asm catch class co_await co_return co_yield concept consteval constexpr constinit "
                             "const_cast decltype delete dynamic_cast explicit export final friend mutable namespace new "
                             "noexcept not operator or override private protected public reinterpret_cast requires "
                             "static_cast template this throw try typeid typename using virtual xor emit signals slots "
                             "Q_OBJECT Q_PROPERTY Q_INVOKABLE Q_SIGNALS Q_SLOTS Q_EMIT");
-        l.types += words("std string wstring vector map set unordered_map unique_ptr shared_ptr QString QStringList "
+        addWords(l.types, "std string wstring vector map set unordered_map unique_ptr shared_ptr QString QStringList "
                          "QList QByteArray QVariant QObject qint64 quint64 qint32 quint32 qreal");
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("python");
-        l.name = QT_TRANSLATE_NOOP("Language", "Python");
-        l.patterns = {QStringLiteral("*.py"), QStringLiteral("*.pyw"), QStringLiteral("*.pyi"),
-                      QStringLiteral("SConstruct"), QStringLiteral("SConscript")};
-        l.interpreters = {QStringLiteral("python"), QStringLiteral("python2"), QStringLiteral("python3")};
-        l.mimeTypes = {QStringLiteral("text/x-python"), QStringLiteral("text/x-python3")};
+        l.id = "python";
+        l.name = "Python";
+        l.patterns = {"*.py", "*.pyw", "*.pyi",
+                      "SConstruct", "SConscript"};
+        l.interpreters = {"python", "python2", "python3"};
+        l.mimeTypes = {"text/x-python", "text/x-python3"};
         l.lineComments = hash;
-        l.quotes = QStringLiteral("\"'");
-        l.multilineQuotes = {QStringLiteral("\"\"\""), QStringLiteral("'''")};
+        l.quotes = "\"'";
+        l.multilineQuotes = {"\"\"\"", "'''"};
         l.keywords = words("and as assert async await break class continue def del elif else except finally for from "
                            "global if import in is lambda nonlocal not or pass raise return try while with yield match case");
         l.types = words("int float str bytes bool list dict set tuple object type complex frozenset bytearray");
         l.constants = words("None True False self cls __name__ __main__ __init__ print len range open super isinstance");
         l.decorators = true;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("javascript");
-        l.name = QT_TRANSLATE_NOOP("Language", "JavaScript");
-        l.patterns = {QStringLiteral("*.js"), QStringLiteral("*.mjs"), QStringLiteral("*.cjs"), QStringLiteral("*.jsx")};
-        l.interpreters = {QStringLiteral("node"), QStringLiteral("nodejs"), QStringLiteral("gjs")};
-        l.mimeTypes = {QStringLiteral("application/javascript"), QStringLiteral("text/javascript")};
+        l.id = "javascript";
+        l.name = "JavaScript";
+        l.patterns = {"*.js", "*.mjs", "*.cjs", "*.jsx"};
+        l.interpreters = {"node", "nodejs", "gjs"};
+        l.mimeTypes = {"application/javascript", "text/javascript"};
         l.lineComments = slashes;
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"'");
-        l.multilineQuotes = {QStringLiteral("`")};
+        l.quotes = "\"'";
+        l.multilineQuotes = {"`"};
         l.keywords = words("async await break case catch class const continue debugger default delete do else export "
                            "extends finally for from function get if import in instanceof let new of return set static "
                            "super switch this throw try typeof var void while with yield");
         l.constants = words("true false null undefined NaN Infinity console window document globalThis");
-        list.append(l);
+        list.push_back(l);
     }
     {
-        Language l = list.last();
-        l.id = QStringLiteral("typescript");
-        l.name = QT_TRANSLATE_NOOP("Language", "TypeScript");
-        l.patterns = {QStringLiteral("*.ts"), QStringLiteral("*.tsx"), QStringLiteral("*.mts"), QStringLiteral("*.cts")};
-        l.interpreters = {QStringLiteral("deno"), QStringLiteral("ts-node")};
-        l.mimeTypes = {QStringLiteral("application/x-typescript"), QStringLiteral("text/x-typescript")};
-        l.keywords += words("abstract as declare enum implements interface keyof namespace private protected public "
+        Language l = list.back();
+        l.id = "typescript";
+        l.name = "TypeScript";
+        l.patterns = {"*.ts", "*.tsx", "*.mts", "*.cts"};
+        l.interpreters = {"deno", "ts-node"};
+        l.mimeTypes = {"application/x-typescript", "text/x-typescript"};
+        addWords(l.keywords, "abstract as declare enum implements interface keyof namespace private protected public "
                             "readonly type satisfies infer is");
         l.types = words("any boolean number string symbol bigint never unknown object void");
-        list.append(l);
+        list.push_back(l);
     }
     {
-        Language l = list.at(3);
-        l.id = QStringLiteral("qml");
-        l.name = QT_TRANSLATE_NOOP("Language", "QML");
-        l.patterns = {QStringLiteral("*.qml"), QStringLiteral("qmldir")};
+        Language l = list[3];
+        l.id = "qml";
+        l.name = "QML";
+        l.patterns = {"*.qml", "qmldir"};
         l.interpreters = {};
-        l.mimeTypes = {QStringLiteral("text/x-qml")};
-        l.keywords += words("property readonly required signal alias component pragma on default");
+        l.mimeTypes = {"text/x-qml"};
+        addWords(l.keywords, "property readonly required signal alias component pragma on default");
         l.types = words("int real double bool string var url color point size rect list date font");
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("sh");
-        l.name = QT_TRANSLATE_NOOP("Language", "Shell");
-        l.patterns = {QStringLiteral("*.sh"), QStringLiteral("*.bash"), QStringLiteral("*.zsh"), QStringLiteral("*.ksh"),
-                      QStringLiteral(".bashrc"), QStringLiteral(".bash_profile"), QStringLiteral(".bash_aliases"),
-                      QStringLiteral(".profile"), QStringLiteral(".zshrc"), QStringLiteral(".zprofile"),
-                      QStringLiteral("PKGBUILD"), QStringLiteral("*.ebuild"), QStringLiteral("APKBUILD")};
-        l.interpreters = {QStringLiteral("sh"), QStringLiteral("bash"), QStringLiteral("zsh"), QStringLiteral("dash"),
-                          QStringLiteral("ksh"), QStringLiteral("ash")};
-        l.mimeTypes = {QStringLiteral("application/x-shellscript"), QStringLiteral("text/x-sh")};
+        l.id = "sh";
+        l.name = "Shell";
+        l.patterns = {"*.sh", "*.bash", "*.zsh", "*.ksh",
+                      ".bashrc", ".bash_profile", ".bash_aliases",
+                      ".profile", ".zshrc", ".zprofile",
+                      "PKGBUILD", "*.ebuild", "APKBUILD"};
+        l.interpreters = {"sh", "bash", "zsh", "dash",
+                          "ksh", "ash"};
+        l.mimeTypes = {"application/x-shellscript", "text/x-sh"};
         l.lineComments = hash;
-        l.quotes = QStringLiteral("\"'`");
+        l.quotes = "\"'`";
         l.keywords = words("if then else elif fi case esac for select while until do done in function time coproc "
                            "return exit break continue local export readonly declare typeset unset shift source alias "
                            "set trap eval exec");
         l.constants = words("true false echo printf read cd test");
         l.dollarVariables = true;
         l.functions = false;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("rust");
-        l.name = QT_TRANSLATE_NOOP("Language", "Rust");
-        l.patterns = {QStringLiteral("*.rs")};
-        l.mimeTypes = {QStringLiteral("text/rust"), QStringLiteral("text/x-rust")};
+        l.id = "rust";
+        l.name = "Rust";
+        l.patterns = {"*.rs"};
+        l.mimeTypes = {"text/rust", "text/x-rust"};
         l.lineComments = slashes;
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"");
+        l.quotes = "\"";
         l.keywords = words("as async await break const continue crate dyn else enum extern fn for if impl in let loop "
                            "match mod move mut pub ref return static struct super trait type unsafe use where while "
                            "macro_rules union");
         l.types = words("i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 bool char str String Vec Option "
                         "Result Box Self HashMap");
         l.constants = words("true false None Some Ok Err self");
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("go");
-        l.name = QT_TRANSLATE_NOOP("Language", "Go");
-        l.patterns = {QStringLiteral("*.go")};
-        l.mimeTypes = {QStringLiteral("text/x-go")};
+        l.id = "go";
+        l.name = "Go";
+        l.patterns = {"*.go"};
+        l.mimeTypes = {"text/x-go"};
         l.lineComments = slashes;
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"'");
-        l.multilineQuotes = {QStringLiteral("`")};
+        l.quotes = "\"'";
+        l.multilineQuotes = {"`"};
         l.keywords = words("break case chan const continue default defer else fallthrough for func go goto if import "
                            "interface map package range return select struct switch type var");
         l.types = words("bool byte complex64 complex128 error float32 float64 int int8 int16 int32 int64 rune string "
                         "uint uint8 uint16 uint32 uint64 uintptr any");
         l.constants = words("true false nil iota append cap close copy delete len make new panic print println recover");
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("java");
-        l.name = QT_TRANSLATE_NOOP("Language", "Java");
-        l.patterns = {QStringLiteral("*.java"), QStringLiteral("*.kt"), QStringLiteral("*.kts")};
-        l.mimeTypes = {QStringLiteral("text/x-java")};
+        l.id = "java";
+        l.name = "Java";
+        l.patterns = {"*.java", "*.kt", "*.kts"};
+        l.mimeTypes = {"text/x-java"};
         l.lineComments = slashes;
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"'");
-        l.multilineQuotes = {QStringLiteral("\"\"\"")};
+        l.quotes = "\"'";
+        l.multilineQuotes = {"\"\"\""};
         l.keywords = words("abstract assert break case catch class continue default do else enum extends final finally "
                            "for if implements import instanceof interface native new package private protected public "
                            "return static strictfp super switch synchronized this throw throws transient try volatile "
@@ -224,31 +247,31 @@ static QList<Language> makeLanguages()
         l.types = words("boolean byte char double float int long short void String Object Integer Long Boolean List Map");
         l.constants = words("true false null");
         l.decorators = true;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("css");
-        l.name = QT_TRANSLATE_NOOP("Language", "CSS");
-        l.patterns = {QStringLiteral("*.css"), QStringLiteral("*.scss"), QStringLiteral("*.less"), QStringLiteral("*.qss")};
-        l.mimeTypes = {QStringLiteral("text/css"), QStringLiteral("text/x-scss")};
+        l.id = "css";
+        l.name = "CSS";
+        l.patterns = {"*.css", "*.scss", "*.less", "*.qss"};
+        l.mimeTypes = {"text/css", "text/x-scss"};
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"'");
+        l.quotes = "\"'";
         l.keywords = words("@media @import @font-face @keyframes @supports @charset @layer !important");
         l.constants = words("none auto inherit initial unset transparent block inline flex grid absolute relative fixed "
                             "solid bold normal center left right top bottom");
         l.hexColors = true;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("sql");
-        l.name = QT_TRANSLATE_NOOP("Language", "SQL");
-        l.patterns = {QStringLiteral("*.sql")};
-        l.mimeTypes = {QStringLiteral("application/sql"), QStringLiteral("text/x-sql")};
-        l.lineComments = {QStringLiteral("--")};
+        l.id = "sql";
+        l.name = "SQL";
+        l.patterns = {"*.sql"};
+        l.mimeTypes = {"application/sql", "text/x-sql"};
+        l.lineComments = {"--"};
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("'\"");
+        l.quotes = "'\"";
         l.caseInsensitive = true;
         l.keywords = words("select from where insert into values update set delete create table drop alter add column "
                            "index view primary key foreign references join inner left right outer full cross on as "
@@ -258,176 +281,177 @@ static QList<Language> makeLanguages()
         l.types = words("int integer bigint smallint real float double decimal numeric char varchar text blob boolean "
                         "date time timestamp serial");
         l.constants = words("true false current_timestamp current_date count sum avg min max coalesce");
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("cmake");
-        l.name = QT_TRANSLATE_NOOP("Language", "CMake");
-        l.patterns = {QStringLiteral("CMakeLists.txt"), QStringLiteral("*.cmake"), QStringLiteral("*.cmake.in")};
-        l.mimeTypes = {QStringLiteral("text/x-cmake")};
+        l.id = "cmake";
+        l.name = "CMake";
+        l.patterns = {"CMakeLists.txt", "*.cmake", "*.cmake.in"};
+        l.mimeTypes = {"text/x-cmake"};
         l.lineComments = hash;
-        l.quotes = QStringLiteral("\"");
+        l.quotes = "\"";
         l.keywords = words("if elseif else endif foreach endforeach while endwhile function endfunction macro endmacro "
                            "return break continue");
         l.constants = words("ON OFF TRUE FALSE YES NO PRIVATE PUBLIC INTERFACE REQUIRED COMPONENTS NOT AND OR STREQUAL "
                             "EQUAL DEFINED");
         l.dollarVariables = true;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("makefile");
-        l.name = QT_TRANSLATE_NOOP("Language", "Makefile");
-        l.patterns = {QStringLiteral("Makefile"), QStringLiteral("makefile"), QStringLiteral("GNUmakefile"),
-                      QStringLiteral("*.mk"), QStringLiteral("*.mak"), QStringLiteral("Makefile.*")};
-        l.mimeTypes = {QStringLiteral("text/x-makefile")};
+        l.id = "makefile";
+        l.name = "Makefile";
+        l.patterns = {"Makefile", "makefile", "GNUmakefile",
+                      "*.mk", "*.mak", "Makefile.*"};
+        l.mimeTypes = {"text/x-makefile"};
         l.lineComments = hash;
-        l.quotes = QStringLiteral("\"'");
+        l.quotes = "\"'";
         l.keywords = words("ifeq ifneq ifdef ifndef else endif include define endef export unexport override .PHONY");
         l.dollarVariables = true;
         l.functions = false;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("markdown");
-        l.name = QT_TRANSLATE_NOOP("Language", "Markdown");
+        l.id = "markdown";
+        l.name = "Markdown";
         l.kind = Language::Markdown;
-        l.patterns = {QStringLiteral("*.md"), QStringLiteral("*.markdown"), QStringLiteral("*.mkd")};
-        l.mimeTypes = {QStringLiteral("text/markdown"), QStringLiteral("text/x-markdown")};
-        list.append(l);
+        l.patterns = {"*.md", "*.markdown", "*.mkd"};
+        l.mimeTypes = {"text/markdown", "text/x-markdown"};
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("html");
-        l.name = QT_TRANSLATE_NOOP("Language", "HTML");
+        l.id = "html";
+        l.name = "HTML";
         l.kind = Language::Markup;
-        l.patterns = {QStringLiteral("*.html"), QStringLiteral("*.htm"), QStringLiteral("*.xhtml")};
-        l.mimeTypes = {QStringLiteral("text/html"), QStringLiteral("application/xhtml+xml")};
-        list.append(l);
+        l.patterns = {"*.html", "*.htm", "*.xhtml"};
+        l.mimeTypes = {"text/html", "application/xhtml+xml"};
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("xml");
-        l.name = QT_TRANSLATE_NOOP("Language", "XML");
+        l.id = "xml";
+        l.name = "XML";
         l.kind = Language::Markup;
-        l.patterns = {QStringLiteral("*.xml"), QStringLiteral("*.svg"), QStringLiteral("*.ui"), QStringLiteral("*.qrc"),
-                      QStringLiteral("*.xsl"), QStringLiteral("*.xslt"), QStringLiteral("*.plist"),
-                      QStringLiteral("*.xbel"), QStringLiteral("*.kml"), QStringLiteral("*.gpx"), QStringLiteral("*.rss"),
-                      QStringLiteral("*.atom"), QStringLiteral("*.policy")};
-        l.mimeTypes = {QStringLiteral("application/xml"), QStringLiteral("text/xml"), QStringLiteral("image/svg+xml")};
-        list.append(l);
+        l.patterns = {"*.xml", "*.svg", "*.ui", "*.qrc",
+                      "*.xsl", "*.xslt", "*.plist",
+                      "*.xbel", "*.kml", "*.gpx", "*.rss",
+                      "*.atom", "*.policy"};
+        l.mimeTypes = {"application/xml", "text/xml", "image/svg+xml"};
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("json");
-        l.name = QT_TRANSLATE_NOOP("Language", "JSON");
+        l.id = "json";
+        l.name = "JSON";
         l.kind = Language::Json;
-        l.patterns = {QStringLiteral("*.json"), QStringLiteral("*.jsonc"), QStringLiteral("*.json5"),
-                      QStringLiteral("*.geojson"), QStringLiteral("*.webmanifest"), QStringLiteral(".babelrc"),
-                      QStringLiteral(".eslintrc")};
-        l.mimeTypes = {QStringLiteral("application/json")};
+        l.patterns = {"*.json", "*.jsonc", "*.json5",
+                      "*.geojson", "*.webmanifest", ".babelrc",
+                      ".eslintrc"};
+        l.mimeTypes = {"application/json"};
         l.lineComments = slashes;
         l.blockComments = {cComment};
-        l.quotes = QStringLiteral("\"");
+        l.quotes = "\"";
         l.constants = words("true false null");
         l.functions = false;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("yaml");
-        l.name = QT_TRANSLATE_NOOP("Language", "YAML");
+        l.id = "yaml";
+        l.name = "YAML";
         l.kind = Language::Yaml;
-        l.patterns = {QStringLiteral("*.yaml"), QStringLiteral("*.yml"), QStringLiteral(".clang-format"),
-                      QStringLiteral(".clang-tidy")};
-        l.mimeTypes = {QStringLiteral("application/x-yaml"), QStringLiteral("application/yaml")};
+        l.patterns = {"*.yaml", "*.yml", ".clang-format",
+                      ".clang-tidy"};
+        l.mimeTypes = {"application/x-yaml", "application/yaml"};
         l.lineComments = hash;
-        l.quotes = QStringLiteral("\"'");
+        l.quotes = "\"'";
         l.constants = words("true false null yes no on off True False Null ~");
         l.functions = false;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("toml");
-        l.name = QT_TRANSLATE_NOOP("Language", "TOML");
+        l.id = "toml";
+        l.name = "TOML";
         l.kind = Language::Ini;
-        l.patterns = {QStringLiteral("*.toml"), QStringLiteral("Cargo.lock"), QStringLiteral("Pipfile")};
-        l.mimeTypes = {QStringLiteral("application/toml")};
+        l.patterns = {"*.toml", "Cargo.lock", "Pipfile"};
+        l.mimeTypes = {"application/toml"};
         l.lineComments = hash;
-        l.quotes = QStringLiteral("\"'");
-        l.multilineQuotes = {QStringLiteral("\"\"\""), QStringLiteral("'''")};
+        l.quotes = "\"'";
+        l.multilineQuotes = {"\"\"\"", "'''"};
         l.constants = words("true false inf nan");
         l.functions = false;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("ini");
-        l.name = QT_TRANSLATE_NOOP("Language", "INI");
+        l.id = "ini";
+        l.name = "INI";
         l.kind = Language::Ini;
-        l.patterns = {QStringLiteral("*.ini"), QStringLiteral("*.conf"), QStringLiteral("*.cfg"), QStringLiteral("*.desktop"),
-                      QStringLiteral("*.service"), QStringLiteral("*.socket"), QStringLiteral("*.timer"),
-                      QStringLiteral("*.target"), QStringLiteral("*.mount"), QStringLiteral("*.path"),
-                      QStringLiteral("*.network"), QStringLiteral("*.netdev"), QStringLiteral("*.link"),
-                      QStringLiteral("*.properties"), QStringLiteral("*.editorconfig"), QStringLiteral(".editorconfig"),
-                      QStringLiteral(".gitconfig"), QStringLiteral(".gitmodules"), QStringLiteral("*.theme"),
-                      QStringLiteral("*.directory"), QStringLiteral("*.rc"), QStringLiteral("mimeapps.list"),
-                      QStringLiteral("*.nmconnection"), QStringLiteral("*.inf")};
-        l.mimeTypes = {QStringLiteral("text/x-ini"), QStringLiteral("application/x-desktop"),
-                       QStringLiteral("text/x-systemd-unit")};
-        l.lineComments = {QStringLiteral("#"), QStringLiteral(";")};
+        l.patterns = {"*.ini", "*.conf", "*.cfg", "*.desktop",
+                      "*.service", "*.socket", "*.timer",
+                      "*.target", "*.mount", "*.path",
+                      "*.network", "*.netdev", "*.link",
+                      "*.properties", "*.editorconfig", ".editorconfig",
+                      ".gitconfig", ".gitmodules", "*.theme",
+                      "*.directory", "*.rc", "mimeapps.list",
+                      "*.nmconnection", "*.inf"};
+        l.mimeTypes = {"text/x-ini", "application/x-desktop",
+                       "text/x-systemd-unit"};
+        l.lineComments = {"#", ";"};
         l.constants = words("true false yes no on off");
         l.functions = false;
-        list.append(l);
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("diff");
-        l.name = QT_TRANSLATE_NOOP("Language", "Diff");
+        l.id = "diff";
+        l.name = "Diff";
         l.kind = Language::Diff;
-        l.patterns = {QStringLiteral("*.diff"), QStringLiteral("*.patch"), QStringLiteral("*.rej"),
-                      QStringLiteral("*.debdiff")};
-        l.mimeTypes = {QStringLiteral("text/x-patch"), QStringLiteral("text/x-diff")};
-        list.append(l);
+        l.patterns = {"*.diff", "*.patch", "*.rej",
+                      "*.debdiff"};
+        l.mimeTypes = {"text/x-patch", "text/x-diff"};
+        list.push_back(l);
     }
     {
         Language l;
-        l.id = QStringLiteral("log");
-        l.name = QT_TRANSLATE_NOOP("Language", "Log");
+        l.id = "log";
+        l.name = "Log";
         l.kind = Language::Log;
-        l.patterns = {QStringLiteral("*.log"), QStringLiteral("*.log.[0-9]"), QStringLiteral("Xorg.*.log")};
-        l.mimeTypes = {QStringLiteral("text/x-log")};
-        list.append(l);
+        l.patterns = {"*.log", "*.log.[0-9]", "Xorg.*.log"};
+        l.mimeTypes = {"text/x-log"};
+        list.push_back(l);
     }
     return list;
 }
 
-static const QList<Language> &allLanguages()
+static const std::vector<Language> &allLanguages()
 {
-    static const QList<Language> list = makeLanguages();
+    static const std::vector<Language> list = makeLanguages();
     return list;
 }
 
-const QList<const Language *> &Syntax::languages()
+const std::vector<const Language *> &Syntax::languages()
 {
-    static const QList<const Language *> list = [] {
-        QList<const Language *> result;
+    static const std::vector<const Language *> list = [] {
+        std::vector<const Language *> result;
         for (const Language &language : allLanguages())
-            result.append(&language);
-        std::sort(result.begin(), result.end(), [](const Language *a, const Language *b) {
-            return QString::localeAwareCompare(QString::fromLatin1(a->name), QString::fromLatin1(b->name)) < 0;
+            result.push_back(&language);
+        const cutefish::base::Locale &locale = cutefish::base::Locale::system();
+        std::stable_sort(result.begin(), result.end(), [&locale](const Language *a, const Language *b) {
+            return locale.compare(a->name, b->name) < 0;
         });
         return result;
     }();
     return list;
 }
 
-const Language *Syntax::language(const QString &id)
+const Language *Syntax::language(std::string_view id)
 {
-    if (id.isEmpty())
+    if (id.empty())
         return nullptr;
     for (const Language &language : allLanguages()) {
         if (language.id == id)
@@ -436,136 +460,183 @@ const Language *Syntax::language(const QString &id)
     return nullptr;
 }
 
-QString Syntax::id(const Language *language)
+std::string Syntax::id(const Language *language)
 {
-    return language ? language->id : QString();
+    return language ? language->id : std::string();
 }
 
-QString Syntax::name(const QString &id)
+std::string Syntax::name(std::string_view id)
 {
     const Language *l = language(id);
-    return l ? QCoreApplication::translate("Language", l->name)
-             : QCoreApplication::translate("Language", "Plain Text");
+    return l ? l->name : "Plain Text";
 }
 
-QString Syntax::detect(const QString &fileName, const QString &firstLine)
+// Without trailing version digits: "python3.11" is "python".
+static std::string_view withoutVersion(std::string_view name)
 {
-    const QString base = QFileInfo(fileName).fileName();
-    if (!base.isEmpty()) {
+    while (!name.empty() && (strings::isAsciiDigit(name.back()) || name.back() == '.'))
+        name.remove_suffix(1);
+    return name;
+}
+
+std::string Syntax::detect(const std::string &fileName, std::string_view firstLine)
+{
+    const std::string base = std::filesystem::path(fileName).filename().string();
+    if (!base.empty()) {
         // Exact names first: "CMakeLists.txt" is CMake, not a text file.
         for (const Language &language : allLanguages()) {
-            for (const QString &pattern : language.patterns) {
-                if (!pattern.contains(QLatin1Char('*')) && pattern == base)
+            for (const std::string &pattern : language.patterns) {
+                if (pattern.find('*') == std::string::npos && pattern == base)
                     return language.id;
             }
         }
         for (const Language &language : allLanguages()) {
-            for (const QString &pattern : language.patterns) {
-                if (pattern.contains(QLatin1Char('*'))
-                        && QRegularExpression::fromWildcard(pattern, Qt::CaseInsensitive).match(base).hasMatch())
+            for (const std::string &pattern : language.patterns) {
+                if (pattern.find('*') != std::string::npos
+                        && ::fnmatch(pattern.c_str(), base.c_str(), FNM_CASEFOLD | FNM_PERIOD) == 0)
                     return language.id;
             }
         }
     }
 
-    if (firstLine.startsWith(QLatin1String("#!"))) {
+    if (strings::startsWith(firstLine, "#!")) {
         // "#!/usr/bin/env -S python3 -u" names python3.
-        const QStringList parts = firstLine.mid(2).split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        for (const QString &part : parts) {
-            if (part.startsWith(QLatin1Char('-')) || part.endsWith(QLatin1String("/env")))
+        for (const std::string_view part : strings::splitViews(firstLine.substr(2), ' ', strings::SplitBehavior::SkipEmptyParts)) {
+            if (part[0] == '-' || strings::endsWith(part, "/env"))
                 continue;
-            QString interpreter = QFileInfo(part).fileName();
-            interpreter.remove(QRegularExpression(QStringLiteral("[0-9.]+$")));
+            const size_t slash = part.rfind('/');
+            const std::string_view interpreter = withoutVersion(slash == std::string_view::npos ? part : part.substr(slash + 1));
             for (const Language &language : allLanguages()) {
-                for (const QString &name : language.interpreters) {
-                    QString stripped = name;
-                    stripped.remove(QRegularExpression(QStringLiteral("[0-9.]+$")));
-                    if (stripped == interpreter)
+                for (const std::string &name : language.interpreters) {
+                    if (withoutVersion(name) == interpreter)
                         return language.id;
                 }
             }
             break;
         }
     }
-    if (firstLine.startsWith(QLatin1String("<?xml")))
-        return QStringLiteral("xml");
-    if (firstLine.startsWith(QLatin1String("<!DOCTYPE html"), Qt::CaseInsensitive)
-            || firstLine.startsWith(QLatin1String("<html"), Qt::CaseInsensitive))
-        return QStringLiteral("html");
-    if (firstLine.startsWith(QLatin1String("diff --git ")) || firstLine.startsWith(QLatin1String("--- ")))
-        return QStringLiteral("diff");
+    if (strings::startsWith(firstLine, "<?xml"))
+        return "xml";
+    if (strings::startsWith(firstLine, "<!DOCTYPE html", strings::CaseSensitivity::Insensitive)
+            || strings::startsWith(firstLine, "<html", strings::CaseSensitivity::Insensitive))
+        return "html";
+    if (strings::startsWith(firstLine, "diff --git ") || strings::startsWith(firstLine, "--- "))
+        return "diff";
 
-    if (!base.isEmpty()) {
-        const QMimeType mime = QMimeDatabase().mimeTypeForFile(fileName, QMimeDatabase::MatchExtension);
+    if (!base.empty()) {
+        const std::string mime = cutefish::base::mime::typeForFileName(base);
         for (const Language &language : allLanguages()) {
-            for (const QString &type : language.mimeTypes) {
-                if (mime.inherits(type))
+            for (const std::string &type : language.mimeTypes) {
+                if (cutefish::base::mime::inherits(mime, type))
                     return language.id;
             }
         }
     }
-    return QString();
+    return std::string();
 }
 
-static bool isWordStart(QChar c)
+static bool isWordStart(char32_t c)
 {
-    return c.isLetter() || c == QLatin1Char('_');
+    return Unicode::isLetter(c) || c == '_';
 }
 
-static bool isWordChar(QChar c)
+static bool isWordChar(char32_t c)
 {
-    return c.isLetterOrNumber() || c == QLatin1Char('_');
+    return Unicode::isLetterOrNumber(c) || c == '_';
 }
 
-static void add(QList<SyntaxSpan> *spans, int start, int length, SyntaxStyle style)
+static void add(std::vector<SyntaxSpan> *spans, int start, int length, SyntaxStyle style)
 {
     if (length <= 0 || style == SyntaxStyle::Normal)
         return;
-    if (!spans->isEmpty()) {
-        SyntaxSpan &last = spans->last();
+    if (!spans->empty()) {
+        SyntaxSpan &last = spans->back();
         if (last.style == style && last.start + last.length == start) {
             last.length += length;
             return;
         }
     }
-    spans->append({start, length, style});
+    spans->push_back({start, length, style});
+}
+
+namespace
+{
+// A line read a character at a time by byte offset.
+struct Line
+{
+    std::string_view text;
+    int size;
+
+    explicit Line(std::string_view line)
+        : text(line)
+        , size(int(line.size()))
+    {
+    }
+
+    char32_t at(int i) const { return Unicode::at(text, size_t(i)); }
+    char32_t before(int i) const { return Unicode::before(text, size_t(i)); }
+    int next(int i) const { return int(Unicode::next(text, size_t(i))); }
+    bool startsWith(int i, std::string_view prefix) const { return text.substr(size_t(i)).substr(0, prefix.size()) == prefix; }
+    int find(std::string_view what, int from = 0) const
+    {
+        const size_t found = text.find(what, size_t(from));
+        return found == std::string_view::npos ? -1 : int(found);
+    }
+    int find(char what, int from = 0) const
+    {
+        const size_t found = text.find(what, size_t(from));
+        return found == std::string_view::npos ? -1 : int(found);
+    }
+    // Past white space from `i`.
+    int skipSpace(int i) const
+    {
+        while (i < size && Unicode::isSpace(at(i)))
+            i = next(i);
+        return i;
+    }
+    int skipWord(int i) const
+    {
+        while (i < size && isWordChar(at(i)))
+            i = next(i);
+        return i;
+    }
+};
 }
 
 // Scans a quoted string from `i` (just past the opening quote); returns the
 // index past the closing one, or -1 when the line ends first.
-static int scanString(const QString &text, int i, const QString &close, QList<SyntaxSpan> *spans, int start,
+static int scanString(const Line &line, int i, std::string_view close, std::vector<SyntaxSpan> *spans, int start,
                       bool escapes = true)
 {
-    const int size = text.size();
-    while (i < size) {
-        if (escapes && text.at(i) == QLatin1Char('\\') && i + 1 < size) {
+    while (i < line.size) {
+        if (escapes && line.text[size_t(i)] == '\\' && i + 1 < line.size) {
             add(spans, start, i - start, SyntaxStyle::String);
-            add(spans, i, 2, SyntaxStyle::Escape);
-            i += 2;
+            const int escaped = line.next(i + 1);
+            add(spans, i, escaped - i, SyntaxStyle::Escape);
+            i = escaped;
             start = i;
             continue;
         }
-        if (QStringView(text).mid(i).startsWith(close)) {
+        if (line.startsWith(i, close)) {
             add(spans, start, i + int(close.size()) - start, SyntaxStyle::String);
             return i + int(close.size());
         }
-        ++i;
+        i = line.next(i);
     }
-    add(spans, start, size - start, SyntaxStyle::String);
+    add(spans, start, line.size - start, SyntaxStyle::String);
     return -1;
 }
 
-static int scanNumber(const QString &text, int i)
+static int scanNumber(const Line &line, int i)
 {
-    const int size = text.size();
     const int begin = i;
-    while (i < size) {
-        const QChar c = text.at(i);
-        if (c.isLetterOrNumber() || c == QLatin1Char('_') || c == QLatin1Char('.')) {
-            ++i;
-        } else if ((c == QLatin1Char('+') || c == QLatin1Char('-')) && i > begin
-                   && (text.at(i - 1) == QLatin1Char('e') || text.at(i - 1) == QLatin1Char('E'))
-                   && !text.mid(begin, 2).startsWith(QLatin1String("0x"), Qt::CaseInsensitive)) {
+    const bool hex = line.size - begin >= 2 && line.text[size_t(begin)] == '0'
+            && (line.text[size_t(begin) + 1] == 'x' || line.text[size_t(begin) + 1] == 'X');
+    while (i < line.size) {
+        const char32_t c = line.at(i);
+        if (Unicode::isLetterOrNumber(c) || c == '_' || c == '.') {
+            i = line.next(i);
+        } else if ((c == '+' || c == '-') && i > begin && (line.before(i) == 'e' || line.before(i) == 'E') && !hex) {
             ++i;
         } else {
             break;
@@ -576,86 +647,81 @@ static int scanNumber(const QString &text, int i)
 
 static constexpr int multilineBase = 16;
 
-static Syntax::State highlightCode(const Language &l, const QString &text, Syntax::State state, QList<SyntaxSpan> *spans)
+static Syntax::State highlightCode(const Language &l, std::string_view text, Syntax::State state, std::vector<SyntaxSpan> *spans)
 {
-    const int size = text.size();
+    const Line line(text);
+    const int size = line.size;
     int i = 0;
 
     // Carried over: inside a block comment or a multi-line string.
     if (state > 0 && state < multilineBase) {
-        const QString &close = l.blockComments.at(state - 1).second;
-        const qsizetype end = text.indexOf(close);
+        const std::string &close = l.blockComments[size_t(state - 1)].second;
+        const int end = line.find(close);
         if (end < 0) {
             add(spans, 0, size, SyntaxStyle::Comment);
             return state;
         }
-        i = int(end + close.size());
+        i = end + int(close.size());
         add(spans, 0, i, SyntaxStyle::Comment);
         state = 0;
     } else if (state >= multilineBase) {
-        const QString &close = l.multilineQuotes.at(state - multilineBase);
-        const int end = scanString(text, 0, close, spans, 0);
+        const std::string &close = l.multilineQuotes[size_t(state - multilineBase)];
+        const int end = scanString(line, 0, close, spans, 0);
         if (end < 0)
             return state;
         i = end;
         state = 0;
     }
 
-    int firstNonSpace = 0;
-    while (firstNonSpace < size && text.at(firstNonSpace).isSpace())
-        ++firstNonSpace;
+    const int firstNonSpace = line.skipSpace(0);
 
-    if (l.hashPreprocessor && firstNonSpace < size && text.at(firstNonSpace) == QLatin1Char('#') && i == 0) {
-        int end = firstNonSpace + 1;
-        while (end < size && text.at(end).isSpace())
-            ++end;
-        while (end < size && isWordChar(text.at(end)))
-            ++end;
+    if (l.hashPreprocessor && firstNonSpace < size && text[size_t(firstNonSpace)] == '#' && i == 0) {
+        int end = line.skipWord(line.skipSpace(firstNonSpace + 1));
         add(spans, firstNonSpace, end - firstNonSpace, SyntaxStyle::Preprocessor);
         // #include <file> reads as a string.
-        const qsizetype open = text.indexOf(QLatin1Char('<'), end);
-        if (QStringView(text).mid(firstNonSpace).contains(QLatin1String("include")) && open >= 0) {
-            const qsizetype close = text.indexOf(QLatin1Char('>'), open);
+        const int open = line.find('<', end);
+        if (text.substr(size_t(firstNonSpace)).find("include") != std::string_view::npos && open >= 0) {
+            const int close = line.find('>', open);
             if (close > open) {
-                add(spans, int(open), int(close - open + 1), SyntaxStyle::String);
-                end = int(close + 1);
+                add(spans, open, close - open + 1, SyntaxStyle::String);
+                end = close + 1;
             }
         }
         i = end;
     }
 
-    // Makefile targets and CMake commands start at the beginning of a line.
-    if (l.id == QLatin1String("makefile") && i == 0 && firstNonSpace == 0) {
-        const qsizetype colon = text.indexOf(QLatin1Char(':'));
-        if (colon > 0 && !text.left(colon).contains(QLatin1Char('=')) && !text.startsWith(QLatin1Char('\t'))
-                && (colon + 1 >= size || text.at(colon + 1) != QLatin1Char('='))) {
-            add(spans, 0, int(colon), SyntaxStyle::Function);
-            i = int(colon);
+    // Makefile targets start at the beginning of a line.
+    if (l.id == "makefile" && i == 0 && firstNonSpace == 0) {
+        const int colon = line.find(':');
+        if (colon > 0 && text.substr(0, size_t(colon)).find('=') == std::string_view::npos && text[0] != '\t'
+                && (colon + 1 >= size || text[size_t(colon) + 1] != '=')) {
+            add(spans, 0, colon, SyntaxStyle::Function);
+            i = colon;
         }
     }
 
+    const bool css = l.id == "css";
     while (i < size) {
-        const QChar c = text.at(i);
-        const QStringView rest = QStringView(text).mid(i);
+        const char32_t c = line.at(i);
 
         bool matched = false;
-        for (const QString &marker : l.lineComments) {
-            if (rest.startsWith(marker)) {
+        for (const std::string &marker : l.lineComments) {
+            if (line.startsWith(i, marker)) {
                 // "#" inside a word, e.g. "a#b" in shell, is no comment.
-                if (marker == QLatin1String("#") && l.dollarVariables && i > 0 && !text.at(i - 1).isSpace())
+                if (marker == "#" && l.dollarVariables && i > 0 && !Unicode::isSpace(line.before(i)))
                     continue;
                 add(spans, i, size - i, SyntaxStyle::Comment);
                 return 0;
             }
         }
-        for (int b = 0; b < l.blockComments.size(); ++b) {
-            if (rest.startsWith(l.blockComments.at(b).first)) {
-                const qsizetype end = text.indexOf(l.blockComments.at(b).second, i + l.blockComments.at(b).first.size());
+        for (size_t b = 0; b < l.blockComments.size(); ++b) {
+            if (line.startsWith(i, l.blockComments[b].first)) {
+                const int end = line.find(l.blockComments[b].second, i + int(l.blockComments[b].first.size()));
                 if (end < 0) {
                     add(spans, i, size - i, SyntaxStyle::Comment);
-                    return b + 1;
+                    return int(b) + 1;
                 }
-                const int stop = int(end + l.blockComments.at(b).second.size());
+                const int stop = end + int(l.blockComments[b].second.size());
                 add(spans, i, stop - i, SyntaxStyle::Comment);
                 i = stop;
                 matched = true;
@@ -665,12 +731,12 @@ static Syntax::State highlightCode(const Language &l, const QString &text, Synta
         if (matched)
             continue;
 
-        for (int q = 0; q < l.multilineQuotes.size(); ++q) {
-            const QString &quote = l.multilineQuotes.at(q);
-            if (rest.startsWith(quote)) {
-                const int end = scanString(text, i + int(quote.size()), quote, spans, i);
+        for (size_t q = 0; q < l.multilineQuotes.size(); ++q) {
+            const std::string &quote = l.multilineQuotes[q];
+            if (line.startsWith(i, quote)) {
+                const int end = scanString(line, i + int(quote.size()), quote, spans, i);
                 if (end < 0)
-                    return multilineBase + q;
+                    return multilineBase + int(q);
                 i = end;
                 matched = true;
                 break;
@@ -679,18 +745,16 @@ static Syntax::State highlightCode(const Language &l, const QString &text, Synta
         if (matched)
             continue;
 
-        if (l.quotes.contains(c)) {
+        if (c < 0x80 && l.quotes.find(char(c)) != std::string::npos) {
             // A JSON string followed by a colon is a key.
-            const int before = spans->size();
-            const bool escapes = !(l.id == QLatin1String("sh") && c == QLatin1Char('\''));
-            int end = scanString(text, i + 1, QString(c), spans, i, escapes);
+            const size_t before = spans->size();
+            const bool escapes = !(l.id == "sh" && c == '\'');
+            int end = scanString(line, i + 1, std::string_view(&text[size_t(i)], 1), spans, i, escapes);
             if (end < 0)
                 end = size;
             if (l.kind == Language::Json || l.kind == Language::Yaml) {
-                int after = end;
-                while (after < size && text.at(after).isSpace())
-                    ++after;
-                if (after < size && text.at(after) == QLatin1Char(':')) {
+                const int after = line.skipSpace(end);
+                if (after < size && text[size_t(after)] == ':') {
                     spans->resize(before);
                     add(spans, i, end - i, SyntaxStyle::Key);
                 }
@@ -699,75 +763,74 @@ static Syntax::State highlightCode(const Language &l, const QString &text, Synta
             continue;
         }
 
-        if (l.dollarVariables && c == QLatin1Char('$') && i + 1 < size) {
+        if (l.dollarVariables && c == '$' && i + 1 < size) {
             int end = i + 1;
-            const QChar next = text.at(end);
-            if (next == QLatin1Char('{') || next == QLatin1Char('(')) {
-                const QChar close = next == QLatin1Char('{') ? QLatin1Char('}') : QLatin1Char(')');
-                const qsizetype stop = text.indexOf(close, end);
-                end = stop < 0 ? size : int(stop + 1);
+            const char32_t next = line.at(end);
+            if (next == '{' || next == '(') {
+                const int stop = line.find(next == '{' ? '}' : ')', end);
+                end = stop < 0 ? size : stop + 1;
             } else if (isWordChar(next)) {
-                while (end < size && isWordChar(text.at(end)))
-                    ++end;
+                end = line.skipWord(end);
             } else {
-                ++end;
+                end = line.next(end);
             }
             add(spans, i, end - i, SyntaxStyle::Variable);
             i = end;
             continue;
         }
 
-        if (l.decorators && c == QLatin1Char('@') && i + 1 < size && isWordStart(text.at(i + 1))) {
+        if (l.decorators && c == '@' && i + 1 < size && isWordStart(line.at(i + 1))) {
             int end = i + 1;
-            while (end < size && (isWordChar(text.at(end)) || text.at(end) == QLatin1Char('.')))
-                ++end;
+            while (end < size && (isWordChar(line.at(end)) || text[size_t(end)] == '.'))
+                end = line.next(end);
             add(spans, i, end - i, SyntaxStyle::Preprocessor);
             i = end;
             continue;
         }
 
-        if (l.hexColors && c == QLatin1Char('#') && i + 1 < size && text.at(i + 1).isLetterOrNumber()
-                && (i == 0 || !isWordChar(text.at(i - 1)))) {
+        if (l.hexColors && c == '#' && i + 1 < size && Unicode::isLetterOrNumber(line.at(i + 1))
+                && (i == 0 || !isWordChar(line.before(i)))) {
             int end = i + 1;
-            while (end < size && (isWordChar(text.at(end)) || text.at(end) == QLatin1Char('-')))
-                ++end;
-            const bool color = end - i == 4 || end - i == 5 || end - i == 7 || end - i == 9;
+            int characters = 1;
+            while (end < size && (isWordChar(line.at(end)) || text[size_t(end)] == '-')) {
+                end = line.next(end);
+                ++characters;
+            }
+            const bool color = characters == 4 || characters == 5 || characters == 7 || characters == 9;
             add(spans, i, end - i, color ? SyntaxStyle::Number : SyntaxStyle::Function);
             i = end;
             continue;
         }
 
-        if (c.isDigit() && (i == 0 || !isWordChar(text.at(i - 1)))) {
-            const int end = scanNumber(text, i);
+        if (Unicode::isDigit(c) && (i == 0 || !isWordChar(line.before(i)))) {
+            const int end = scanNumber(line, i);
             add(spans, i, end - i, SyntaxStyle::Number);
             i = end;
             continue;
         }
 
-        if (isWordStart(c) || (c == QLatin1Char('@') && l.id == QLatin1String("css"))
-                || (c == QLatin1Char('.') && l.id == QLatin1String("makefile"))
-                || (c == QLatin1Char('!') && l.id == QLatin1String("css"))) {
-            int end = i + 1;
-            while (end < size && (isWordChar(text.at(end)) || (l.id == QLatin1String("css") && text.at(end) == QLatin1Char('-'))))
-                ++end;
-            const QString word = text.mid(i, end - i);
-            const QString key = l.caseInsensitive ? word.toLower() : word;
+        if (isWordStart(c) || (c == '@' && css) || (c == '.' && l.id == "makefile") || (c == '!' && css)) {
+            int end = line.next(i);
+            while (end < size && (isWordChar(line.at(end)) || (css && text[size_t(end)] == '-')))
+                end = line.next(end);
+            const std::string_view word = text.substr(size_t(i), size_t(end - i));
+            const std::string lowered = l.caseInsensitive ? Unicode::toLower(word) : std::string();
+            const std::string_view key = l.caseInsensitive ? std::string_view(lowered) : word;
             SyntaxStyle style = SyntaxStyle::Normal;
-            if (l.keywords.contains(key))
+            if (l.keywords.find(key) != l.keywords.end())
                 style = SyntaxStyle::Keyword;
-            else if (l.types.contains(key))
+            else if (l.types.find(key) != l.types.end())
                 style = SyntaxStyle::Type;
-            else if (l.constants.contains(key))
+            else if (l.constants.find(key) != l.constants.end())
                 style = SyntaxStyle::Constant;
-            else if (l.functions && end < size && text.at(end) == QLatin1Char('('))
+            else if (l.functions && end < size && text[size_t(end)] == '(')
                 style = SyntaxStyle::Function;
-            else if (l.kind == Language::Yaml || l.id == QLatin1String("css")) {
+            else if (l.kind == Language::Yaml || css) {
                 int after = end;
-                while (after < size && (isWordChar(text.at(after)) || text.at(after) == QLatin1Char('-')
-                                        || text.at(after) == QLatin1Char('.')))
-                    ++after;
-                if (after < size && text.at(after) == QLatin1Char(':')
-                        && (after + 1 >= size || text.at(after + 1).isSpace())) {
+                while (after < size && (isWordChar(line.at(after)) || text[size_t(after)] == '-' || text[size_t(after)] == '.'))
+                    after = line.next(after);
+                if (after < size && text[size_t(after)] == ':'
+                        && (after + 1 >= size || Unicode::isSpace(line.at(after + 1)))) {
                     style = SyntaxStyle::Key;
                     end = after;
                 }
@@ -777,16 +840,17 @@ static Syntax::State highlightCode(const Language &l, const QString &text, Synta
             continue;
         }
 
-        ++i;
+        i = line.next(i);
     }
     return 0;
 }
 
-static Syntax::State highlightMarkdown(const QString &text, Syntax::State state, QList<SyntaxSpan> *spans)
+static Syntax::State highlightMarkdown(std::string_view text, Syntax::State state, std::vector<SyntaxSpan> *spans)
 {
-    const int size = text.size();
-    const QString trimmed = text.trimmed();
-    const bool fence = trimmed.startsWith(QLatin1String("```")) || trimmed.startsWith(QLatin1String("~~~"));
+    const Line line(text);
+    const int size = line.size;
+    const std::string_view trimmed = strings::trimmed(text);
+    const bool fence = strings::startsWith(trimmed, "```") || strings::startsWith(trimmed, "~~~");
     if (state == 1) {
         add(spans, 0, size, SyntaxStyle::Code);
         return fence ? 0 : 1;
@@ -796,97 +860,94 @@ static Syntax::State highlightMarkdown(const QString &text, Syntax::State state,
         return 1;
     }
 
-    if (trimmed.startsWith(QLatin1Char('#'))) {
+    if (strings::startsWith(trimmed, "#")) {
         add(spans, 0, size, SyntaxStyle::Heading);
         return 0;
     }
-    if (trimmed.startsWith(QLatin1Char('>'))) {
+    if (strings::startsWith(trimmed, ">")) {
         add(spans, 0, size, SyntaxStyle::Comment);
         return 0;
     }
-    static const QRegularExpression rule(QStringLiteral("^\\s*([-*_])(\\s*\\1){2,}\\s*$"));
-    if (rule.match(text).hasMatch() || (text.startsWith(QLatin1String("===")) && trimmed.count(QLatin1Char('=')) == trimmed.size())) {
+    static const RegExp rule("^\\s*([-*_])(\\s*\\1){2,}\\s*$");
+    if (rule.match(text).hasMatch()
+            || (strings::startsWith(text, "===") && size_t(std::count(trimmed.begin(), trimmed.end(), '=')) == trimmed.size())) {
         add(spans, 0, size, SyntaxStyle::Heading);
         return 0;
     }
 
-    int i = 0;
-    while (i < size && text.at(i).isSpace())
-        ++i;
-    static const QRegularExpression list(QStringLiteral("^([-*+]|\\d+[.)])\\s"));
-    const QRegularExpressionMatch marker = list.match(text, i, QRegularExpression::NormalMatch,
-                                                      QRegularExpression::AnchorAtOffsetMatchOption);
+    int i = line.skipSpace(0);
+    static const RegExp list("^([-*+]|\\d+[.)])\\s");
+    const RegExp::Match marker = list.match(text, size_t(i), true);
     if (marker.hasMatch()) {
-        add(spans, i, int(marker.capturedLength(1)), SyntaxStyle::Keyword);
-        i += int(marker.capturedLength());
+        add(spans, i, int(marker.length(1)), SyntaxStyle::Keyword);
+        i += int(marker.length());
     }
 
     while (i < size) {
-        const QChar c = text.at(i);
-        if (c == QLatin1Char('\\') && i + 1 < size) {
-            i += 2;
+        const char c = text[size_t(i)];
+        if (c == '\\' && i + 1 < size) {
+            i = line.next(i + 1);
             continue;
         }
-        if (c == QLatin1Char('`')) {
-            const qsizetype end = text.indexOf(QLatin1Char('`'), i + 1);
+        if (c == '`') {
+            const int end = line.find('`', i + 1);
             if (end > i) {
-                add(spans, i, int(end - i + 1), SyntaxStyle::Code);
-                i = int(end + 1);
+                add(spans, i, end - i + 1, SyntaxStyle::Code);
+                i = end + 1;
                 continue;
             }
         }
-        if ((c == QLatin1Char('*') || c == QLatin1Char('_')) && i + 1 < size) {
-            const bool strong = text.at(i + 1) == c;
-            const QString marker = strong ? QString(2, c) : QString(c);
+        if ((c == '*' || c == '_') && i + 1 < size) {
+            const bool strong = text[size_t(i) + 1] == c;
+            const std::string marker = strong ? std::string(2, c) : std::string(1, c);
             const int from = i + int(marker.size());
             // "_" inside a word, as in snake_case, is not emphasis.
-            const bool wordInside = c == QLatin1Char('_') && i > 0 && isWordChar(text.at(i - 1));
-            if (!wordInside && from < size && !text.at(from).isSpace()) {
-                const qsizetype end = text.indexOf(marker, from);
+            const bool wordInside = c == '_' && i > 0 && isWordChar(line.before(i));
+            if (!wordInside && from < size && !Unicode::isSpace(line.at(from))) {
+                const int end = line.find(marker, from);
                 if (end > from) {
-                    const int stop = int(end + marker.size());
+                    const int stop = end + int(marker.size());
                     add(spans, i, stop - i, strong ? SyntaxStyle::Strong : SyntaxStyle::Emphasis);
                     i = stop;
                     continue;
                 }
             }
         }
-        if (c == QLatin1Char('[') || (c == QLatin1Char('!') && i + 1 < size && text.at(i + 1) == QLatin1Char('['))) {
-            static const QRegularExpression link(QStringLiteral("!?\\[[^\\]]*\\](\\([^)]*\\)|\\[[^\\]]*\\])"));
-            const QRegularExpressionMatch match = link.match(text, i, QRegularExpression::NormalMatch,
-                                                             QRegularExpression::AnchorAtOffsetMatchOption);
+        if (c == '[' || (c == '!' && i + 1 < size && text[size_t(i) + 1] == '[')) {
+            static const RegExp link("!?\\[[^\\]]*\\](\\([^)]*\\)|\\[[^\\]]*\\])");
+            const RegExp::Match match = link.match(text, size_t(i), true);
             if (match.hasMatch()) {
-                add(spans, i, int(match.capturedLength()), SyntaxStyle::Link);
-                i += int(match.capturedLength());
+                add(spans, i, int(match.length()), SyntaxStyle::Link);
+                i += int(match.length());
                 continue;
             }
         }
-        if (c == QLatin1Char('<')) {
-            static const QRegularExpression autolink(QStringLiteral("<(https?://|mailto:)[^>\\s]+>"));
-            const QRegularExpressionMatch match = autolink.match(text, i, QRegularExpression::NormalMatch,
-                                                                 QRegularExpression::AnchorAtOffsetMatchOption);
+        if (c == '<') {
+            static const RegExp autolink("<(https?://|mailto:)[^>\\s]+>");
+            const RegExp::Match match = autolink.match(text, size_t(i), true);
             if (match.hasMatch()) {
-                add(spans, i, int(match.capturedLength()), SyntaxStyle::Link);
-                i += int(match.capturedLength());
+                add(spans, i, int(match.length()), SyntaxStyle::Link);
+                i += int(match.length());
                 continue;
             }
         }
-        ++i;
+        i = line.next(i);
     }
     return 0;
 }
 
 // States: 1 inside a comment, 2 inside a tag, 3 and 4 inside a "..." or
 // '...' attribute value of a tag, 5 inside CDATA.
-static Syntax::State highlightMarkup(const QString &text, Syntax::State state, QList<SyntaxSpan> *spans)
+static Syntax::State highlightMarkup(std::string_view text, Syntax::State state, std::vector<SyntaxSpan> *spans)
 {
-    const int size = text.size();
+    const Line line(text);
+    const int size = line.size;
     int i = 0;
     while (i < size) {
         if (state == 1 || state == 5) {
-            const QString close = state == 1 ? QStringLiteral("-->") : QStringLiteral("]]>");
-            const qsizetype end = text.indexOf(close, i);
-            const int stop = end < 0 ? size : int(end + close.size());
+            const std::string_view close = state == 1 ? "-->" : "]]>";
+            const int end = line.find(close, i);
+            const int stop = end < 0 ? size : end + int(close.size());
             add(spans, i, stop - i, state == 1 ? SyntaxStyle::Comment : SyntaxStyle::Code);
             if (end < 0)
                 return state;
@@ -895,9 +956,8 @@ static Syntax::State highlightMarkup(const QString &text, Syntax::State state, Q
             continue;
         }
         if (state == 3 || state == 4) {
-            const QChar quote = state == 3 ? QLatin1Char('"') : QLatin1Char('\'');
-            const qsizetype end = text.indexOf(quote, i);
-            const int stop = end < 0 ? size : int(end + 1);
+            const int end = line.find(state == 3 ? '"' : '\'', i);
+            const int stop = end < 0 ? size : end + 1;
             add(spans, i, stop - i, SyntaxStyle::String);
             if (end < 0)
                 return state;
@@ -905,167 +965,165 @@ static Syntax::State highlightMarkup(const QString &text, Syntax::State state, Q
             state = 2;
             continue;
         }
+        const char32_t c = line.at(i);
         if (state == 2) {
-            const QChar c = text.at(i);
-            if (c == QLatin1Char('>') || (c == QLatin1Char('/') && i + 1 < size && text.at(i + 1) == QLatin1Char('>'))
-                    || (c == QLatin1Char('?') && i + 1 < size && text.at(i + 1) == QLatin1Char('>'))) {
-                const int length = c == QLatin1Char('>') ? 1 : 2;
+            if (c == '>' || ((c == '/' || c == '?') && i + 1 < size && text[size_t(i) + 1] == '>')) {
+                const int length = c == '>' ? 1 : 2;
                 add(spans, i, length, SyntaxStyle::Tag);
                 i += length;
                 state = 0;
-            } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
-                state = c == QLatin1Char('"') ? 3 : 4;
+            } else if (c == '"' || c == '\'') {
+                state = c == '"' ? 3 : 4;
                 add(spans, i, 1, SyntaxStyle::String);
                 ++i;
-            } else if (isWordStart(c) || c == QLatin1Char(':')) {
-                int end = i + 1;
-                while (end < size && (isWordChar(text.at(end)) || text.at(end) == QLatin1Char('-')
-                                      || text.at(end) == QLatin1Char(':') || text.at(end) == QLatin1Char('.')))
-                    ++end;
+            } else if (isWordStart(c) || c == ':') {
+                int end = line.next(i);
+                while (end < size && (isWordChar(line.at(end)) || text[size_t(end)] == '-' || text[size_t(end)] == ':'
+                                      || text[size_t(end)] == '.'))
+                    end = line.next(end);
                 add(spans, i, end - i, SyntaxStyle::Attribute);
                 i = end;
             } else {
-                ++i;
+                i = line.next(i);
             }
             continue;
         }
 
-        const QStringView rest = QStringView(text).mid(i);
-        if (rest.startsWith(QLatin1String("<!--"))) {
+        if (line.startsWith(i, "<!--")) {
             state = 1;
             add(spans, i, 4, SyntaxStyle::Comment);
             i += 4;
-        } else if (rest.startsWith(QLatin1String("<![CDATA["))) {
+        } else if (line.startsWith(i, "<![CDATA[")) {
             state = 5;
             add(spans, i, 9, SyntaxStyle::Code);
             i += 9;
-        } else if (text.at(i) == QLatin1Char('<') && i + 1 < size
-                   && (isWordStart(text.at(i + 1)) || text.at(i + 1) == QLatin1Char('/')
-                       || text.at(i + 1) == QLatin1Char('!') || text.at(i + 1) == QLatin1Char('?'))) {
+        } else if (c == '<' && i + 1 < size
+                   && (isWordStart(line.at(i + 1)) || text[size_t(i) + 1] == '/' || text[size_t(i) + 1] == '!'
+                       || text[size_t(i) + 1] == '?')) {
             int end = i + 1;
-            while (end < size && (isWordChar(text.at(end)) || text.at(end) == QLatin1Char('/')
-                                  || text.at(end) == QLatin1Char('!') || text.at(end) == QLatin1Char('?')
-                                  || text.at(end) == QLatin1Char('-') || text.at(end) == QLatin1Char(':')
-                                  || text.at(end) == QLatin1Char('.')))
-                ++end;
+            while (end < size) {
+                const char32_t e = line.at(end);
+                if (!isWordChar(e) && e != '/' && e != '!' && e != '?' && e != '-' && e != ':' && e != '.')
+                    break;
+                end = line.next(end);
+            }
             add(spans, i, end - i, SyntaxStyle::Tag);
             i = end;
             state = 2;
-        } else if (text.at(i) == QLatin1Char('&')) {
-            const qsizetype end = text.indexOf(QLatin1Char(';'), i);
-            if (end > i && end - i < 12) {
-                add(spans, i, int(end - i + 1), SyntaxStyle::Escape);
-                i = int(end + 1);
+        } else if (c == '&') {
+            const int end = line.find(';', i);
+            // Within twelve characters, as counted before in UTF-16.
+            if (end > i && Unicode::utf16Length(text.substr(size_t(i), size_t(end - i))) < 12) {
+                add(spans, i, end - i + 1, SyntaxStyle::Escape);
+                i = end + 1;
             } else {
                 ++i;
             }
         } else {
-            ++i;
+            i = line.next(i);
         }
     }
     return state;
 }
 
-static Syntax::State highlightIni(const Language &l, const QString &text, Syntax::State state, QList<SyntaxSpan> *spans)
+static Syntax::State highlightIni(const Language &l, std::string_view text, Syntax::State state, std::vector<SyntaxSpan> *spans)
 {
-    const int size = text.size();
+    const Line line(text);
+    const int size = line.size;
     if (state >= multilineBase)
         return highlightCode(l, text, state, spans);
 
-    int i = 0;
-    while (i < size && text.at(i).isSpace())
-        ++i;
+    const int i = line.skipSpace(0);
     if (i >= size)
         return 0;
-    const QChar first = text.at(i);
-    if (first == QLatin1Char('#') || first == QLatin1Char(';')) {
+    const char first = text[size_t(i)];
+    if (first == '#' || first == ';') {
         add(spans, i, size - i, SyntaxStyle::Comment);
         return 0;
     }
-    if (first == QLatin1Char('[')) {
-        const qsizetype end = text.lastIndexOf(QLatin1Char(']'));
-        add(spans, i, end > i ? int(end - i + 1) : size - i, SyntaxStyle::Section);
+    if (first == '[') {
+        const size_t end = text.rfind(']');
+        add(spans, i, end != std::string_view::npos && int(end) > i ? int(end) - i + 1 : size - i, SyntaxStyle::Section);
         return 0;
     }
-    qsizetype equals = text.indexOf(QLatin1Char('='), i);
-    if (equals < 0 && l.id == QLatin1String("ini"))
-        equals = text.indexOf(QLatin1Char(':'), i);
+    int equals = line.find('=', i);
+    if (equals < 0 && l.id == "ini")
+        equals = line.find(':', i);
     if (equals > i) {
-        add(spans, i, int(equals - i), SyntaxStyle::Key);
+        add(spans, i, equals - i, SyntaxStyle::Key);
         // The value: TOML values are typed, INI values are text.
-        if (l.id == QLatin1String("toml")) {
-            QList<SyntaxSpan> valueSpans;
-            const Syntax::State end = highlightCode(l, text.mid(equals + 1), 0, &valueSpans);
-            for (const SyntaxSpan &span : std::as_const(valueSpans))
-                add(spans, span.start + int(equals) + 1, span.length, span.style);
+        if (l.id == "toml") {
+            std::vector<SyntaxSpan> valueSpans;
+            const Syntax::State end = highlightCode(l, text.substr(size_t(equals) + 1), 0, &valueSpans);
+            for (const SyntaxSpan &span : valueSpans)
+                add(spans, span.start + equals + 1, span.length, span.style);
             return end;
         }
-        const QString value = text.mid(equals + 1).trimmed();
-        if (l.constants.contains(value.toLower())) {
-            add(spans, int(text.lastIndexOf(value)), int(value.size()), SyntaxStyle::Constant);
-        } else if (!value.isEmpty() && (value.at(0).isDigit() || value.at(0) == QLatin1Char('-'))) {
-            bool number = false;
-            value.toDouble(&number);
-            if (number)
-                add(spans, int(text.lastIndexOf(value)), int(value.size()), SyntaxStyle::Number);
+        const std::string_view value = strings::trimmed(text.substr(size_t(equals) + 1));
+        const int at = int(text.rfind(value));
+        if (l.constants.find(strings::toAsciiLower(value)) != l.constants.end()) {
+            add(spans, at, int(value.size()), SyntaxStyle::Constant);
+        } else if (!value.empty() && (strings::isAsciiDigit(value[0]) || value[0] == '-')) {
+            if (strings::toDouble(value))
+                add(spans, at, int(value.size()), SyntaxStyle::Number);
         }
     }
     return 0;
 }
 
-static Syntax::State highlightYaml(const Language &l, const QString &text, QList<SyntaxSpan> *spans)
+static Syntax::State highlightYaml(const Language &l, std::string_view text, std::vector<SyntaxSpan> *spans)
 {
-    if (text.startsWith(QLatin1String("---")) || text.startsWith(QLatin1String("..."))) {
+    if (strings::startsWith(text, "---") || strings::startsWith(text, "...")) {
         add(spans, 0, int(text.size()), SyntaxStyle::Preprocessor);
         return 0;
     }
-    int i = 0;
-    while (i < text.size() && text.at(i).isSpace())
-        ++i;
-    if (i < text.size() && text.at(i) == QLatin1Char('-') && (i + 1 >= text.size() || text.at(i + 1).isSpace()))
+    const Line line(text);
+    const int i = line.skipSpace(0);
+    if (i < line.size && text[size_t(i)] == '-' && (i + 1 >= line.size || Unicode::isSpace(line.at(i + 1))))
         add(spans, i, 1, SyntaxStyle::Keyword);
     return highlightCode(l, text, 0, spans);
 }
 
-static void highlightDiff(const QString &text, QList<SyntaxSpan> *spans)
+static void highlightDiff(std::string_view text, std::vector<SyntaxSpan> *spans)
 {
-    const int size = text.size();
-    if (text.startsWith(QLatin1String("+++")) || text.startsWith(QLatin1String("---"))
-            || text.startsWith(QLatin1String("diff ")) || text.startsWith(QLatin1String("index "))
-            || text.startsWith(QLatin1String("Index: ")) || text.startsWith(QLatin1String("new file mode"))
-            || text.startsWith(QLatin1String("deleted file mode")) || text.startsWith(QLatin1String("similarity index"))
-            || text.startsWith(QLatin1String("rename ")))
+    const int size = int(text.size());
+    if (strings::startsWith(text, "+++") || strings::startsWith(text, "---") || strings::startsWith(text, "diff ")
+            || strings::startsWith(text, "index ") || strings::startsWith(text, "Index: ")
+            || strings::startsWith(text, "new file mode") || strings::startsWith(text, "deleted file mode")
+            || strings::startsWith(text, "similarity index") || strings::startsWith(text, "rename "))
         add(spans, 0, size, SyntaxStyle::DiffHeader);
-    else if (text.startsWith(QLatin1String("@@")))
+    else if (strings::startsWith(text, "@@"))
         add(spans, 0, size, SyntaxStyle::Function);
-    else if (text.startsWith(QLatin1Char('+')) || text.startsWith(QLatin1Char('>')))
+    else if (strings::startsWith(text, "+") || strings::startsWith(text, ">"))
         add(spans, 0, size, SyntaxStyle::Added);
-    else if (text.startsWith(QLatin1Char('-')) || text.startsWith(QLatin1Char('<')))
+    else if (strings::startsWith(text, "-") || strings::startsWith(text, "<"))
         add(spans, 0, size, SyntaxStyle::Removed);
 }
 
-static void highlightLog(const QString &text, QList<SyntaxSpan> *spans)
+static void highlightLog(std::string_view text, std::vector<SyntaxSpan> *spans)
 {
-    static const QRegularExpression pattern(QStringLiteral(
+    static const RegExp pattern(
             "(?<time>^\\S*\\d{2}:\\d{2}(:\\d{2})?\\S*|^\\w{3} [ \\d]\\d \\d{2}:\\d{2}:\\d{2}|^\\d{4}-\\d{2}-\\d{2}[T ][\\d:.,]+\\S*)"
             "|(?<error>\\b(ERROR|Error|error|FATAL|Fatal|CRITICAL|Critical|FAIL(ED)?|Failed|failed|EE)\\b)"
             "|(?<warning>\\b(WARN(ING)?|Warning|warning|WW)\\b)"
-            "|(?<info>\\b(INFO|Info|NOTICE|DEBUG|Debug|TRACE|II)\\b)"));
-    auto it = pattern.globalMatch(text);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch match = it.next();
+            "|(?<info>\\b(INFO|Info|NOTICE|DEBUG|Debug|TRACE|II)\\b)");
+    static const int error = pattern.groupNumber("error");
+    static const int warning = pattern.groupNumber("warning");
+    static const int info = pattern.groupNumber("info");
+    pattern.forEachMatch(text, 0, [&](const RegExp::Match &match) {
         SyntaxStyle style = SyntaxStyle::Comment;
-        if (match.capturedLength(QStringLiteral("error")) > 0)
+        if (match.length(error) > 0)
             style = SyntaxStyle::Error;
-        else if (match.capturedLength(QStringLiteral("warning")) > 0)
+        else if (match.length(warning) > 0)
             style = SyntaxStyle::Warning;
-        else if (match.capturedLength(QStringLiteral("info")) > 0)
+        else if (match.length(info) > 0)
             style = SyntaxStyle::Type;
-        add(spans, int(match.capturedStart()), int(match.capturedLength()), style);
-    }
+        add(spans, int(match.start()), int(match.length()), style);
+        return true;
+    });
 }
 
-Syntax::State Syntax::highlight(const Language *language, const QString &text, State state, QList<SyntaxSpan> *spans)
+Syntax::State Syntax::highlight(const Language *language, std::string_view text, State state, std::vector<SyntaxSpan> *spans)
 {
     if (!language)
         return 0;

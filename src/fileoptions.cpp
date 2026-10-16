@@ -2,195 +2,198 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fileoptions.h"
+#include "regexp.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QRegularExpression>
+#include "base/file.h"
+#include "base/strings.h"
+
+#include <filesystem>
+#include <map>
+
+namespace strings = cutefish::base::strings;
 
 // The EditorConfig glob syntax as a regular expression: * stays within a
 // path component, ** crosses them, {a,b} and [...] as in the shell.
-static QString globToRegex(const QString &glob)
+static std::string globToRegex(std::string_view glob)
 {
-    QString result;
+    std::string result;
     int braces = 0;
-    for (int i = 0; i < glob.size(); ++i) {
-        const QChar c = glob.at(i);
-        if (c == QLatin1Char('*')) {
-            if (i + 1 < glob.size() && glob.at(i + 1) == QLatin1Char('*')) {
-                result += QLatin1String(".*");
+    for (size_t i = 0; i < glob.size(); ++i) {
+        const char c = glob[i];
+        if (c == '*') {
+            if (i + 1 < glob.size() && glob[i + 1] == '*') {
+                result += ".*";
                 ++i;
             } else {
-                result += QLatin1String("[^/]*");
+                result += "[^/]*";
             }
-        } else if (c == QLatin1Char('?')) {
-            result += QLatin1String("[^/]");
-        } else if (c == QLatin1Char('[')) {
-            const qsizetype end = glob.indexOf(QLatin1Char(']'), i + 1);
-            if (end < 0) {
-                result += QLatin1String("\\[");
+        } else if (c == '?') {
+            result += "[^/]";
+        } else if (c == '[') {
+            const size_t end = glob.find(']', i + 1);
+            if (end == std::string_view::npos) {
+                result += "\\[";
             } else {
-                QString set = glob.mid(i + 1, end - i - 1);
-                if (set.startsWith(QLatin1Char('!')))
-                    set[0] = QLatin1Char('^');
-                result += QLatin1Char('[') + set + QLatin1Char(']');
-                i = int(end);
+                std::string set(glob.substr(i + 1, end - i - 1));
+                if (!set.empty() && set[0] == '!')
+                    set[0] = '^';
+                result += '[' + set + ']';
+                i = end;
             }
-        } else if (c == QLatin1Char('{')) {
+        } else if (c == '{') {
             ++braces;
-            result += QLatin1String("(?:");
-        } else if (c == QLatin1Char('}') && braces > 0) {
+            result += "(?:";
+        } else if (c == '}' && braces > 0) {
             --braces;
-            result += QLatin1Char(')');
-        } else if (c == QLatin1Char(',') && braces > 0) {
-            result += QLatin1Char('|');
-        } else if (c == QLatin1Char('/')) {
+            result += ')';
+        } else if (c == ',' && braces > 0) {
+            result += '|';
+        } else if (c == '/') {
             result += c;
-        } else if (c == QLatin1Char('\\') && i + 1 < glob.size()) {
-            result += QRegularExpression::escape(glob.at(++i));
+        } else if (c == '\\' && i + 1 < glob.size()) {
+            result += RegExp::escape(glob.substr(++i, 1));
         } else {
-            result += QRegularExpression::escape(c);
+            result += RegExp::escape(glob.substr(i, 1));
         }
     }
     return result;
 }
 
-bool EditorConfig::globMatches(const QString &glob, const QString &relativePath)
+bool EditorConfig::globMatches(std::string_view glob, const std::string &relativePath)
 {
-    QString pattern = glob;
-    if (pattern.startsWith(QLatin1Char('/')))
-        pattern.remove(0, 1);
-    else if (!pattern.contains(QLatin1Char('/')))
-        pattern.prepend(QLatin1String("**/"));
-    QString regex = globToRegex(pattern);
+    std::string pattern(glob);
+    if (!pattern.empty() && pattern[0] == '/')
+        pattern.erase(0, 1);
+    else if (pattern.find('/') == std::string::npos)
+        pattern.insert(0, "**/");
+    std::string regex = globToRegex(pattern);
     // "**/" also matches no directory at all.
-    regex.replace(QLatin1String(".*/"), QLatin1String("(?:.*/)?"));
-    const QRegularExpression expression(QRegularExpression::anchoredPattern(regex));
+    regex = strings::replaceAll(regex, ".*/", "(?:.*/)?");
+    const RegExp expression("\\A(?:" + regex + ")\\z");
     return expression.match(relativePath).hasMatch();
 }
 
-void EditorConfig::apply(const QString &configText, const QString &relativePath, bool *root)
+void EditorConfig::apply(std::string_view configText, const std::string &relativePath, bool *root)
 {
     bool matches = false;
     bool preamble = true;
-    for (const QString &raw : configText.split(QLatin1Char('\n'))) {
-        const QString line = raw.trimmed();
-        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line.startsWith(QLatin1Char(';')))
+    for (const std::string_view raw : strings::splitViews(configText, '\n')) {
+        const std::string_view line = strings::trimmed(raw);
+        if (line.empty() || line[0] == '#' || line[0] == ';')
             continue;
-        if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']'))) {
+        if (line.front() == '[' && line.back() == ']') {
             preamble = false;
-            matches = globMatches(line.mid(1, line.size() - 2), relativePath);
+            matches = globMatches(line.substr(1, line.size() - 2), relativePath);
             continue;
         }
-        const qsizetype equals = line.indexOf(QLatin1Char('='));
-        if (equals < 0)
+        const size_t equals = line.find('=');
+        if (equals == std::string_view::npos)
             continue;
-        const QString key = line.left(equals).trimmed().toLower();
-        const QString value = line.mid(equals + 1).trimmed().toLower();
+        const std::string key = strings::toAsciiLower(strings::trimmed(line.substr(0, equals)));
+        const std::string value = strings::toAsciiLower(strings::trimmed(line.substr(equals + 1)));
         if (preamble) {
-            if (key == QLatin1String("root") && root)
-                *root = value == QLatin1String("true");
+            if (key == "root" && root)
+                *root = value == "true";
             continue;
         }
         if (!matches)
             continue;
 
-        bool number = false;
-        const int size = value.toInt(&number);
-        if (key == QLatin1String("indent_style")) {
-            if (value == QLatin1String("space") || value == QLatin1String("tab"))
-                insertSpaces = value == QLatin1String("space");
-        } else if (key == QLatin1String("indent_size")) {
-            if (number && size > 0 && size <= 16)
-                indentSize = size;
-            else if (value == QLatin1String("tab"))
+        const std::optional<int> size = strings::toNumber<int>(value);
+        if (key == "indent_style") {
+            if (value == "space" || value == "tab")
+                insertSpaces = value == "space";
+        } else if (key == "indent_size") {
+            if (size && *size > 0 && *size <= 16)
+                indentSize = *size;
+            else if (value == "tab")
                 indentSize.reset();
-        } else if (key == QLatin1String("tab_width")) {
-            if (number && size > 0 && size <= 16)
-                tabWidth = size;
-        } else if (key == QLatin1String("end_of_line")) {
-            if (value == QLatin1String("lf"))
+        } else if (key == "tab_width") {
+            if (size && *size > 0 && *size <= 16)
+                tabWidth = *size;
+        } else if (key == "end_of_line") {
+            if (value == "lf")
                 lineEnding = LineEnding::Unix;
-            else if (value == QLatin1String("crlf"))
+            else if (value == "crlf")
                 lineEnding = LineEnding::Windows;
-            else if (value == QLatin1String("cr"))
+            else if (value == "cr")
                 lineEnding = LineEnding::ClassicMac;
-        } else if (key == QLatin1String("charset")) {
-            charsetBom = value == QLatin1String("utf-8-bom");
-            if (value == QLatin1String("utf-8") || value == QLatin1String("utf-8-bom"))
-                charset = QByteArrayLiteral("UTF-8");
-            else if (value == QLatin1String("utf-16le"))
-                charset = QByteArrayLiteral("UTF-16LE");
-            else if (value == QLatin1String("utf-16be"))
-                charset = QByteArrayLiteral("UTF-16BE");
-            else if (value == QLatin1String("latin1"))
-                charset = QByteArrayLiteral("ISO-8859-1");
-        } else if (key == QLatin1String("trim_trailing_whitespace")) {
-            trimTrailingWhitespace = value == QLatin1String("true");
-        } else if (key == QLatin1String("insert_final_newline")) {
-            insertFinalNewline = value == QLatin1String("true");
+        } else if (key == "charset") {
+            charsetBom = value == "utf-8-bom";
+            if (value == "utf-8" || value == "utf-8-bom")
+                charset = "UTF-8";
+            else if (value == "utf-16le")
+                charset = "UTF-16LE";
+            else if (value == "utf-16be")
+                charset = "UTF-16BE";
+            else if (value == "latin1")
+                charset = "ISO-8859-1";
+        } else if (key == "trim_trailing_whitespace") {
+            trimTrailingWhitespace = value == "true";
+        } else if (key == "insert_final_newline") {
+            insertFinalNewline = value == "true";
         }
     }
 }
 
-EditorConfig EditorConfig::forFile(const QString &path)
+EditorConfig EditorConfig::forFile(const std::string &path)
 {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    const fs::path absolute = fs::absolute(fs::path(path), error).lexically_normal();
+
     // Nearer files override farther ones, so they are applied last.
-    QStringList configs;
-    QDir dir = QFileInfo(path).absoluteDir();
+    std::vector<std::pair<fs::path, std::string>> configs;
+    fs::path dir = absolute.parent_path();
     while (true) {
-        const QString config = dir.filePath(QStringLiteral(".editorconfig"));
-        QFile file(config);
-        if (file.open(QIODevice::ReadOnly) && file.size() < 1024 * 1024) {
-            const QString text = QString::fromUtf8(file.readAll());
-            configs.prepend(config);
-            bool root = false;
-            EditorConfig probe;
-            probe.apply(text, QString(), &root);
-            if (root)
-                break;
+        const fs::path config = dir / ".editorconfig";
+        if (fs::is_regular_file(config, error) && fs::file_size(config, error) < 1024 * 1024) {
+            if (std::optional<std::string> text = cutefish::base::file::read(config.string())) {
+                bool root = false;
+                EditorConfig probe;
+                probe.apply(*text, std::string(), &root);
+                configs.insert(configs.begin(), {dir, std::move(*text)});
+                if (root)
+                    break;
+            }
         }
-        if (!dir.cdUp())
+        if (!dir.has_parent_path() || dir.parent_path() == dir)
             break;
+        dir = dir.parent_path();
     }
 
     EditorConfig result;
-    const QString absolute = QFileInfo(path).absoluteFilePath();
-    for (const QString &config : std::as_const(configs)) {
-        QFile file(config);
-        if (!file.open(QIODevice::ReadOnly))
-            continue;
-        const QString relative = QFileInfo(config).absoluteDir().relativeFilePath(absolute);
-        result.apply(QString::fromUtf8(file.readAll()), relative, nullptr);
+    for (const auto &[folder, text] : configs) {
+        const std::string relative = absolute.lexically_relative(folder).string();
+        result.apply(text, relative, nullptr);
     }
     if (result.indentSize && !result.tabWidth)
         result.tabWidth = result.indentSize;
     return result;
 }
 
-std::optional<Indentation> FileOptions::detectIndentation(const QList<QString> &lines)
+std::optional<Indentation> FileOptions::detectIndentation(const std::vector<std::string> &lines)
 {
     int tabs = 0;
     int spaces = 0;
-    QHash<int, int> steps;
+    std::map<int, int> steps;
     int previous = 0;
-    const int limit = qMin<int>(lines.size(), 2000);
-    for (int i = 0; i < limit; ++i) {
-        const QString &line = lines.at(i);
-        if (line.trimmed().isEmpty())
+    const size_t limit = std::min<size_t>(lines.size(), 2000);
+    for (size_t i = 0; i < limit; ++i) {
+        const std::string &line = lines[i];
+        if (strings::trimmed(line).empty())
             continue;
-        if (line.startsWith(QLatin1Char('\t'))) {
+        if (line[0] == '\t') {
             ++tabs;
             previous = 0;
             continue;
         }
         int indent = 0;
-        while (indent < line.size() && line.at(indent) == QLatin1Char(' '))
+        while (indent < int(line.size()) && line[size_t(indent)] == ' ')
             ++indent;
         // A " * " comment continuation is not indentation.
-        if (indent > 0 && indent < line.size() && line.at(indent) == QLatin1Char('*')) {
+        if (indent > 0 && indent < int(line.size()) && line[size_t(indent)] == '*')
             continue;
-        }
         if (indent > 0)
             ++spaces;
         const int step = indent - previous;
@@ -206,10 +209,10 @@ std::optional<Indentation> FileOptions::detectIndentation(const QList<QString> &
 
     int best = 0;
     int bestCount = 0;
-    for (auto it = steps.cbegin(); it != steps.cend(); ++it) {
-        if (it.value() > bestCount || (it.value() == bestCount && it.key() < best)) {
-            best = it.key();
-            bestCount = it.value();
+    for (const auto &[step, count] : steps) {
+        if (count > bestCount) {
+            best = step;
+            bestCount = count;
         }
     }
     if (best == 0)

@@ -5,58 +5,57 @@ cmake_minimum_required(VERSION 3.16)
 
 project(cutefish-text-editor VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(GNUInstallDirs)
 include(CTest)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 DBus Concurrent LinguistTools)
-find_package(CutefishFramework REQUIRED COMPONENTS Application)
+find_package(CutefishToolkit REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ICU REQUIRED IMPORTED_TARGET icu-uc)
+# PCRE2 runs regular-expression find.
+pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
 add_library(editor-core STATIC
     src/document.cpp
     src/fileoptions.cpp
     src/recentfiles.cpp
+    src/regexp.cpp
     src/searcher.cpp
     src/session.cpp
     src/syntax.cpp
     src/textbuffer.cpp
     src/textcodec.cpp
     src/undostack.cpp
+    src/unicode.cpp
 )
 target_include_directories(editor-core PUBLIC src)
-# Linked into the application module.
-set_target_properties(editor-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(editor-core PUBLIC Qt6::Core Qt6::Concurrent)
+target_link_libraries(editor-core PUBLIC Cutefish::ToolkitBase PRIVATE PkgConfig::ICU PkgConfig::PCRE2)
 
-cutefish_add_application(${PROJECT_NAME} SOURCES
-    src/main.cpp
+add_library(editor-ui STATIC
     src/application.cpp
+    src/codelayout.cpp
+    src/controls.cpp
+    src/dialogs.cpp
+    src/editorpage.cpp
+    src/editorsettings.cpp
     src/editorview.cpp
+    src/editorwindow.cpp
+    src/pagebars.cpp
     src/syntaxtheme.cpp
-    resources.qrc
 )
-target_compile_definitions(${PROJECT_NAME}-module PRIVATE TEXT_EDITOR_VERSION="${PROJECT_VERSION}")
-target_link_libraries(${PROJECT_NAME}-module PRIVATE
-    editor-core
-    Qt6::Gui
-    Qt6::Quick
-    Qt6::QuickControls2
-    Qt6::DBus
-)
+target_include_directories(editor-ui PUBLIC src)
+target_link_libraries(editor-ui PUBLIC editor-core Cutefish::Toolkit PRIVATE PkgConfig::ICU)
 
-file(GLOB TS_FILES translations/*.ts)
-qt6_add_translation(QM_FILES ${TS_FILES})
-add_custom_target(translations DEPENDS ${QM_FILES} SOURCES ${TS_FILES})
-add_dependencies(${PROJECT_NAME} translations)
+add_executable(${PROJECT_NAME} src/main.cpp)
+target_compile_definitions(${PROJECT_NAME} PRIVATE TEXT_EDITOR_VERSION="${PROJECT_VERSION}")
+target_link_libraries(${PROJECT_NAME} PRIVATE editor-ui)
+
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 install(FILES cutefish-text-editor.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES ${QM_FILES} DESTINATION ${CMAKE_INSTALL_DATADIR}/cutefish-text-editor/translations)
 
 if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
     add_subdirectory(tests)
 endif()

@@ -6,36 +6,26 @@
 
 #include "syntax.h"
 
-#include <QColor>
-#include <QObject>
+#include "ui/geometry.h"
 
 // The text area's own colours and one per syntax style, in a light and a dark
 // variant that follow the system appearance.
 struct SyntaxTheme
 {
-    QColor background;
-    QColor text;
-    QColor gutterText;
-    QColor currentLine;
-    QColor selection;
-    QColor match;
-    QColor currentMatch;
-    QColor bracket;
-    QColor whitespace;
-    QColor styles[int(SyntaxStyle::Count)];
+    cutefish::ui::Color background;
+    cutefish::ui::Color text;
+    cutefish::ui::Color gutterText;
+    cutefish::ui::Color currentLine;
+    cutefish::ui::Color selection;
+    cutefish::ui::Color match;
+    cutefish::ui::Color currentMatch;
+    cutefish::ui::Color bracket;
+    cutefish::ui::Color whitespace;
+    cutefish::ui::Color styles[int(SyntaxStyle::Count)];
 
-    static SyntaxTheme theme(bool dark, const QColor &accent);
-};
-
-// The theme's colours that QML needs.
-class SyntaxThemes : public QObject
-{
-    Q_OBJECT
-
-public:
-    using QObject::QObject;
-    // The background the theme gives the text area.
-    Q_INVOKABLE QColor background(bool dark) const;
+    static SyntaxTheme theme(bool dark, cutefish::ui::Color accent);
+    // The background the theme gives the text area, which the window takes.
+    static cutefish::ui::Color windowBackground(bool dark);
 };
 
 #endif
