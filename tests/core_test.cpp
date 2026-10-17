@@ -138,6 +138,12 @@ TEST_F(CoreTest, EncodingDetection)
         EXPECT_FALSE(decoded.binary);
     }
     EXPECT_EQ(TextCodec::decode(encode(chinese, "GB18030")).lines[0], "这是一个简单的中文文本文件，用来测试编码检测。");
+
+    // Longer than the sample, which ends inside a character.
+    std::string large;
+    while (large.size() < 300 * 1024)
+        large += "\xE2\x82\xAC";
+    EXPECT_EQ(TextCodec::detect(large), "UTF-8");
 }
 
 TEST_F(CoreTest, LocaleEncoding)

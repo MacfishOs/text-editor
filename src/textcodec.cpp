@@ -170,6 +170,18 @@ static std::string_view trimmedSample(std::string_view data)
     return data.substr(0, end);
 }
 
+// The sample up to its last whole UTF-8 character, so text in a script of
+// multibyte characters only is not cut inside one.
+static std::string_view utf8Sample(std::string_view data)
+{
+    if (data.size() <= sampleSize)
+        return data;
+    size_t end = sampleSize;
+    while (end > sampleSize - 3 && (static_cast<unsigned char>(data[end]) & 0xC0) == 0x80)
+        --end;
+    return data.substr(0, end);
+}
+
 // UTF-16 without a BOM: one byte of nearly every ASCII character is zero.
 static std::string detectUtf16(std::string_view sample)
 {
@@ -334,7 +346,7 @@ std::string TextCodec::detect(std::string_view data, bool *bom)
         return utf16;
 
     // Checked in one piece, so a sequence cut at the end counts as an error too.
-    if (Unicode::isValid(data.size() <= sampleSize ? data : sample))
+    if (Unicode::isValid(utf8Sample(data)))
         return "UTF-8";
 
     const std::string preferred = localeEncoding();
