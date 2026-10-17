@@ -272,6 +272,22 @@ TEST_F(CoreTest, UndoCleanState)
     EXPECT_TRUE(document.isModified());
 }
 
+TEST_F(CoreTest, UndoKeepsRedoAcrossEmptyGroups)
+{
+    Document document;
+    document.setText("abc");
+    document.setCursor({0, 3});
+    document.insertText("d");
+    document.undo();
+    // Nothing to unindent and nothing to replace.
+    document.indentSelection(true);
+    document.setSearch("x", false, false, false, false);
+    EXPECT_EQ(document.replaceAll("y"), 0);
+    EXPECT_TRUE(document.canRedo());
+    document.redo();
+    EXPECT_EQ(document.text(), "abcd");
+}
+
 TEST_F(CoreTest, UndoRestoresSelection)
 {
     Document document;

@@ -23,6 +23,7 @@ void UndoStack::clear()
     m_index = 0;
     m_cleanIndex = 0;
     m_depth = 0;
+    m_groupOpen = false;
     m_sealed = false;
 }
 
@@ -30,28 +31,18 @@ void UndoStack::begin(const Selection &before)
 {
     if (m_depth++ > 0)
         return;
-    m_groups.resize(size_t(m_index));
-    if (m_cleanIndex > m_index)
-        m_cleanIndex = -1;
-    UndoGroup group;
-    group.before = before;
-    group.after = before;
-    m_groups.push_back(std::move(group));
-    ++m_index;
+    m_groupBefore = before;
+    m_groupOpen = false;
 }
 
 void UndoStack::end(const Selection &after)
 {
     if (m_depth == 0 || --m_depth > 0)
         return;
-    UndoGroup &group = m_groups.back();
-    group.after = after;
+    if (m_groupOpen)
+        m_groups.back().after = after;
+    m_groupOpen = false;
     m_sealed = true;
-    // Nothing was changed: drop the empty group.
-    if (group.steps.empty()) {
-        m_groups.pop_back();
-        --m_index;
-    }
 }
 
 bool UndoStack::canMerge(const UndoGroup &group, const EditStep &step, UndoGroup::Kind kind, int64_t time) const
@@ -91,7 +82,8 @@ bool UndoStack::canMerge(const UndoGroup &group, const EditStep &step, UndoGroup
 void UndoStack::record(const EditStep &step, UndoGroup::Kind kind, const Selection &before,
                        const Selection &after, int64_t time)
 {
-    if (m_depth > 0) {
+    // A group that changes nothing leaves the redo entries alone.
+    if (m_depth > 0 && m_groupOpen) {
         m_groups.back().steps.push_back(step);
         return;
     }
@@ -99,6 +91,17 @@ void UndoStack::record(const EditStep &step, UndoGroup::Kind kind, const Selecti
     m_groups.resize(size_t(m_index));
     if (m_cleanIndex > m_index)
         m_cleanIndex = -1;
+
+    if (m_depth > 0) {
+        UndoGroup group;
+        group.steps.push_back(step);
+        group.before = m_groupBefore;
+        group.after = m_groupBefore;
+        m_groups.push_back(std::move(group));
+        ++m_index;
+        m_groupOpen = true;
+        return;
+    }
 
     if (!m_groups.empty() && canMerge(m_groups.back(), step, kind, time)) {
         UndoGroup &group = m_groups.back();

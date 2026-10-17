@@ -79,6 +79,8 @@ private:
     int m_index = 0;
     int m_cleanIndex = 0;
     int m_depth = 0;
+    Selection m_groupBefore;
+    bool m_groupOpen = false;
     bool m_sealed = false;
 };
 
