@@ -222,10 +222,11 @@ public:
         }
     }
 
-    // The track eases while tabs slide; the "+" follows it frame by frame.
+    // The track eases while tabs slide; the "+" follows it frame by frame,
+    // placed as the header lays out, after the bar has moved.
     void followTrack()
     {
-        placeNewTab();
+        requestLayout();
         Window *window = this->window();
         if (!window)
             return;
@@ -255,7 +256,7 @@ private:
         void tick(uint64_t) override
         {
             const double width = m_header->tabBar->trackWidth();
-            m_header->placeNewTab();
+            m_header->requestLayout();
             // Started again, so the next frame ticks it after the bar.
             stopTicking();
             if (--m_framesLeft > 0 || width != m_lastWidth)

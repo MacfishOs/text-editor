@@ -10,6 +10,7 @@
 #include "base/process.h"
 #include "ui/application.h"
 #include "ui/check_box.h"
+#include "ui/color_provider.h"
 #include "ui/combo_box.h"
 #include "ui/dialog_window.h"
 #include "ui/icon.h"
@@ -561,10 +562,7 @@ protected:
     {
         if (m_last)
             return;
-        const Theme &theme = Theme::current();
-        // The separator: the disabled text colour at 0.1, 0.3 in the dark.
-        hairline(painter, 16, 44 - 1 / painter.scale(), geometry().width - 32,
-                 theme.disabledText.withAlpha(theme.darkMode ? 0.3 : 0.1));
+        hairline(painter, 16, 44 - 1 / painter.scale(), geometry().width - 32, color(ColorId::Separator));
     }
 
 private:

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "controls.h"
+#include "colors.h"
 
+#include "ui/color_provider.h"
 #include "ui/icon.h"
 #include "ui/keys.h"
 #include "ui/label.h"
@@ -100,17 +102,16 @@ void RoundButton::layout()
 
 void RoundButton::paint(Painter &painter)
 {
-    const Theme &theme = Theme::current();
-    Color color = m_background;
+    Color fill = m_background;
     if (isEnabled()) {
         if (m_pressed || m_checked)
-            color = theme.text.withAlpha(theme.darkMode ? 0.06 : 0.21);
+            fill = color(ColorId::RoundButtonPressed);
         else if (m_hovered)
-            color = theme.text.withAlpha(theme.darkMode ? 0.12 : 0.11);
+            fill = color(ColorId::RoundButtonHovered);
     } else {
-        color = {0, 0, 0, 0};
+        fill = {0, 0, 0, 0};
     }
-    if (color.a == 0)
+    if (fill.a == 0)
         return;
     // Whole device pixels of the icon's parity, so the snapped plate and the
     // snapped icon share a centre wherever the button lands.
@@ -128,7 +129,7 @@ void RoundButton::paint(Painter &painter)
     const double iconX = std::round((geometry().width - icon) / 2);
     const double iconY = std::round((geometry().height - icon) / 2);
     const RectF plate{iconX + (icon - width) / 2, iconY + (icon - height) / 2, width, height};
-    painter.drawRoundedRect(plate, {std::min(width, height) / 2, 0, Corners::Circular}, color);
+    painter.drawRoundedRect(plate, {std::min(width, height) / 2, 0, Corners::Circular}, fill);
 }
 
 void RoundButton::enabledChanged()
@@ -219,17 +220,17 @@ void TextButton::paint(Painter &painter)
 {
     const Theme &theme = Theme::current();
     const bool enabled = isEnabled();
-    Color color = theme.alternateBackground;
+    Color fill = color(ColorId::ButtonBackground);
     if (!enabled)
-        color = theme.alternateBackground;
+        fill = color(ColorId::ButtonBackground);
     else if (m_pressed)
-        color = m_flat ? theme.highlight.withAlpha(0.25) : theme.darkMode ? color.lighter(1.1) : color.darker(1.2);
+        fill = m_flat ? theme.highlight.withAlpha(0.25) : color(ColorId::ButtonBackgroundPressed);
     else if (m_hovered)
-        color = m_flat ? theme.highlight.withAlpha(0.2) : theme.darkMode ? color.lighter(1.2) : color.darker(1.1);
+        fill = m_flat ? theme.highlight.withAlpha(0.2) : color(ColorId::ButtonBackgroundHovered);
     else if (m_flat)
-        color = theme.highlight.withAlpha(0.1);
-    painter.drawRoundedRect(localRect(), {theme.mediumRadius, 0, themeCorners()}, color, 1 / painter.scale(),
-                            enabled && hasVisibleFocus() ? theme.highlight.withAlpha(0.5) : Color{0, 0, 0, 0});
+        fill = theme.highlight.withAlpha(0.1);
+    painter.drawRoundedRect(localRect(), {theme.mediumRadius, 0, themeCorners()}, fill, 1 / painter.scale(),
+                            enabled && hasVisibleFocus() ? color(ColorId::ButtonFocusRing) : Color{0, 0, 0, 0});
 }
 
 void TextButton::enabledChanged()
@@ -293,9 +294,9 @@ void FloatingCard::paint(Painter &painter)
 {
     const Theme &theme = Theme::current();
     const RectF plate = localRect();
-    painter.drawShadow(plate, m_radius, shadowSigma, Color{0, 0, 0, 255}.withAlpha(theme.darkMode ? 0.35 : 0.16), {0, 3});
+    painter.drawShadow(plate, m_radius, shadowSigma, color(EditorColor::FloatingCardShadow), {0, 3});
     painter.drawRoundedRect(plate, {m_radius, 0, Corners::Circular}, theme.secondBackground, 1 / painter.scale(),
-                            theme.text.withAlpha(theme.darkMode ? 0.12 : 0.08));
+                            color(EditorColor::FloatingCardBorder));
 }
 
 void drawHairline(Painter &painter, double x, double y, double width, Color color)

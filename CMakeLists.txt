@@ -36,6 +36,7 @@ target_link_libraries(editor-core PUBLIC Cutefish::ToolkitBase PRIVATE PkgConfig
 add_library(editor-ui STATIC
     src/application.cpp
     src/codelayout.cpp
+    src/colors.cpp
     src/controls.cpp
     src/dialogs.cpp
     src/editorpage.cpp
