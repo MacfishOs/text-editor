@@ -181,7 +181,6 @@ void EditorPage::setEditorWindow(EditorWindow *window)
 void EditorPage::applySettings()
 {
     const EditorSettings &settings = m_application.settings();
-    const Theme &theme = Theme::current();
     if (m_window)
         m_editor->setFont(m_window->editorFont());
     m_editor->setWordWrap(settings.wordWrap);
@@ -190,10 +189,7 @@ void EditorPage::applySettings()
     m_editor->setShowWhitespace(settings.showWhitespace);
     m_editor->setMatchBrackets(settings.matchBrackets);
     m_editor->setAutoIndent(settings.autoIndent);
-    m_editor->setDarkMode(theme.darkMode);
-    m_editor->setAccentColor(theme.highlight);
-    const Color background = m_editor->backgroundColor();
-    m_editor->setScrollBarDarkMode(0.2126 * background.r + 0.7152 * background.g + 0.0722 * background.b < 0.5 * 255);
+    applyTheme();
     m_statusBar->update();
     if (m_findBar)
         m_findBar->refresh();
@@ -409,8 +405,18 @@ void EditorPage::updateLoading()
     m_area->requestPaint();
 }
 
+void EditorPage::applyTheme()
+{
+    const Theme &theme = Theme::current();
+    m_editor->setDarkMode(theme.darkMode);
+    m_editor->setAccentColor(theme.highlight);
+    const Color background = m_editor->backgroundColor();
+    m_editor->setScrollBarDarkMode(0.2126 * background.r + 0.7152 * background.g + 0.0722 * background.b < 0.5 * 255);
+}
+
 void EditorPage::layout()
 {
+    applyTheme();
     const double width = geometry().width;
     const double height = geometry().height;
     double top = 0;

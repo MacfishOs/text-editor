@@ -12,6 +12,7 @@
 enum class EditorColor : uint16_t {
     FloatingCardShadow = uint16_t(cutefish::ui::ColorId::ApplicationFirst),
     FloatingCardBorder,
+    WindowBackground,
 };
 
 void addEditorColors(cutefish::ui::ColorMixer &mixer, const cutefish::ui::Theme &theme);

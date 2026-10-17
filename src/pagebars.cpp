@@ -110,7 +110,7 @@ void StatusBar::update()
     m_lineEnding->label()->setText(lineEndingShortNames[document.lineEnding()]);
     m_encoding->label()->setText(document.encoding() + (document.hasBom() ? " BOM" : ""));
     for (RoundButton *item : m_items)
-        item->label()->setColor(Theme::current().disabledText);
+        item->label()->setColor(ColorId::DisabledText);
     requestLayout();
 }
 
@@ -584,11 +584,11 @@ void FindBar::refresh()
     }
     m_count->setText(count);
     m_count->setVisible(!count.empty());
-    m_count->setColor(invalid || notFound ? accent::red : theme.disabledText);
+    m_count->setColor(invalid || notFound ? ColorRecipe(accent::red) : ColorRecipe(ColorId::DisabledText));
 
     const auto setToggle = [&theme](RoundButton *toggle, bool on) {
         toggle->setBackgroundColor(on ? theme.highlight.withAlpha(0.18) : Color{0, 0, 0, 0});
-        toggle->label()->setColor(on ? theme.highlight : theme.text);
+        toggle->label()->setColor(on ? ColorId::Highlight : ColorId::Text);
     };
     setToggle(m_caseToggle, settings.findCaseSensitive);
     setToggle(m_wordsToggle, settings.findWholeWords);

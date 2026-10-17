@@ -97,6 +97,7 @@ protected:
 private:
     class EditorArea;
 
+    void applyTheme();
     void confirmReload(const std::string &encoding);
     void cardChanged();
     void settleScroll();

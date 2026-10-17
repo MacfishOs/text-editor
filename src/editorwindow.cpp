@@ -3,11 +3,11 @@
 
 #include "editorwindow.h"
 #include "application.h"
+#include "colors.h"
 #include "dialogs.h"
 #include "editorsettings.h"
 #include "editorview.h"
 #include "pagebars.h"
-#include "syntaxtheme.h"
 
 #include "base/event_loop.h"
 #include "base/strings.h"
@@ -292,7 +292,7 @@ EditorWindow::EditorWindow(EditorApplication &application, Options options)
     m_window->resize(options.size.width > 0 ? options.size : SizeF{900, 640});
     if (options.restoresSize)
         m_window->setRestoresSize("Main");
-    m_window->setBackgroundColor(SyntaxTheme::windowBackground(Theme::current().darkMode));
+    m_window->setBackgroundColor(EditorColor::WindowBackground);
 
     auto content = std::make_unique<Content>();
     m_content = content.get();
@@ -332,8 +332,6 @@ EditorWindow::EditorWindow(EditorApplication &application, Options options)
     };
     m_connections.push_back(m_application.settings().changed.connect([this] { applySettings(); }));
     addShortcuts();
-    m_header->tabBar->setDarkMode(Theme::current().darkMode);
-    m_header->tabBar->setTextColor(Theme::current().text);
 
     if (options.detachedPage) {
         insertTab(std::move(options.detachedPage), 0);
@@ -1120,10 +1118,6 @@ void EditorWindow::toggleFullScreen()
 
 void EditorWindow::applySettings()
 {
-    const Theme &theme = Theme::current();
-    m_window->setBackgroundColor(SyntaxTheme::windowBackground(theme.darkMode));
-    m_header->tabBar->setDarkMode(theme.darkMode);
-    m_header->tabBar->setTextColor(theme.text);
     for (EditorPage *page : m_pages)
         page->applySettings();
 }

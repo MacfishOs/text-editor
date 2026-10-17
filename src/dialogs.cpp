@@ -53,7 +53,6 @@ public:
         : m_column(addChild<Column>())
         , m_header(addChild<WindowHeader>(44))
     {
-        const Theme &theme = Theme::current();
         m_column->setMargins({16, 16, 16, 12});
         m_column->setSpacing(16);
 
@@ -69,7 +68,7 @@ public:
         titleLabel->setLayoutHints({.fillWidth = true});
         Label *text = texts->addChild<Label>("If you don't save, your changes will be lost.");
         text->setFontSize(14);
-        text->setColor(theme.disabledText);
+        text->setColor(ColorId::DisabledText);
         text->setWrap(true);
         text->setLayoutHints({.fillWidth = true});
 
@@ -151,7 +150,7 @@ void SaveChangesDialog::ask(const std::vector<EditorPage *> &pages, std::functio
             : "Save changes to " + std::to_string(pages.size()) + " documents?";
 
     m_window = std::make_unique<Window>();
-    m_window->setBackgroundColor(Theme::current().secondBackground);
+    m_window->setBackgroundColor(ColorId::SecondBackground);
     m_window->setTransientParent(m_parent, true);
     m_window->setTitle(title);
     m_window->onCloseRequested = [this] { finish(false); };
@@ -470,7 +469,7 @@ void PreferencesDialog::show()
     }
     m_dialog = std::make_unique<DialogWindow>(m_parent, "Settings", 460);
     m_dialog->setContent<Content>(m_application);
-    m_dialog->window()->setBackgroundColor(Theme::current().background);
+    m_dialog->window()->setBackgroundColor(ColorId::Background);
     m_dialog->show();
 }
 
@@ -537,7 +536,7 @@ public:
         , m_value(addChild<Label>(std::move(value)))
         , m_last(last)
     {
-        m_value->setColor(Theme::current().disabledText);
+        m_value->setColor(ColorId::DisabledText);
         m_value->setTextAlignment(Label::TextAlignment::Right);
     }
 
@@ -598,7 +597,7 @@ private:
         {
             for (const ShortcutSection &section : shortcutSections()) {
                 Label *title = addChild<Label>(section.title);
-                title->setColor(Theme::current().disabledText);
+                title->setColor(ColorId::DisabledText);
                 title->setElide(Label::Elide::Right);
                 Card *card = addChild<Card>();
                 for (size_t i = 0; i < section.rows.size(); ++i) {
@@ -667,7 +666,7 @@ void ShortcutsDialog::show()
     }
     m_dialog = std::make_unique<DialogWindow>(m_parent, "Keyboard Shortcuts", 480);
     m_dialog->setContent<Content>();
-    m_dialog->window()->setBackgroundColor(Theme::current().background);
+    m_dialog->window()->setBackgroundColor(ColorId::Background);
     DialogWindow *dialog = m_dialog.get();
     m_dialog->window()->addShortcut(NoModifier, key::Escape, [dialog] { dialog->close(); });
     m_dialog->show();
