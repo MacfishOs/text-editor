@@ -1437,11 +1437,17 @@ int Document::replaceAll(const std::string &replacement)
         const int lower = line == scope.start.line ? scope.start.column : 0;
         const int upper = line == scope.end.line ? scope.end.column : int(text.size());
         const std::vector<TextRange> matches = m_searcher.matchesInLine(text, line, lower, upper);
-        for (auto it = matches.crbegin(); it != matches.crend(); ++it) {
-            const std::string with = m_searcher.replacement(m_buffer, *it, replacement);
+        // Captures come from the line as it was found: a match can look ahead into the next one's text.
+        std::vector<std::string> replacements;
+        replacements.reserve(matches.size());
+        for (const TextRange &match : matches)
+            replacements.push_back(m_searcher.replacement(m_buffer, match, replacement));
+        for (size_t i = matches.size(); i-- > 0;) {
+            const TextRange &match = matches[i];
+            const std::string &with = replacements[i];
             if (line == scope.end.line)
-                scopeEnd.column += int(with.size()) - (it->end.column - it->start.column);
-            replace(*it, with, UndoGroup::Other, {m_cursor, m_anchor});
+                scopeEnd.column += int(with.size()) - (match.end.column - match.start.column);
+            replace(match, with, UndoGroup::Other, {m_cursor, m_anchor});
             ++count;
         }
     }

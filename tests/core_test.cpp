@@ -348,6 +348,12 @@ TEST_F(CoreTest, SearchRegexReplace)
     document.setSearch("x*|(y)", false, false, true, false);
     EXPECT_EQ(document.replaceAll("[$1]"), 1);
     EXPECT_EQ(document.text(), "[y]");
+
+    // Captures of a match that looks ahead into the next match's text.
+    document.setText("aaa");
+    document.setSearch("a(?=a)", false, false, true, false);
+    EXPECT_EQ(document.replaceAll("[$0]"), 2);
+    EXPECT_EQ(document.text(), "[a][a]a");
 }
 
 TEST_F(CoreTest, SearchScopeAndWrap)
