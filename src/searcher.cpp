@@ -138,7 +138,8 @@ std::string Searcher::replacement(const TextBuffer &buffer, const TextRange &ran
         return replace;
 
     const std::string &text = buffer.line(range.start.line);
-    const RegExp::Match match = m_expression.match(text, size_t(range.start.column), true);
+    // Matches are never empty; one found past an empty match at its start is the non-empty one.
+    const RegExp::Match match = m_expression.match(text, size_t(range.start.column), true, true);
     auto captured = [&](char digit) { return match.captured(text, digit - '0'); };
     std::string result;
     for (size_t i = 0; i < replace.size(); ++i) {

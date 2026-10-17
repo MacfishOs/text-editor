@@ -342,6 +342,12 @@ TEST_F(CoreTest, SearchRegexReplace)
     EXPECT_EQ(document.matchCount(), 0);
     document.setSearch("b|", false, false, true, false);
     EXPECT_EQ(document.matchCount(), 1);
+
+    // Captures of the match found past an empty one at the same place.
+    document.setText("y");
+    document.setSearch("x*|(y)", false, false, true, false);
+    EXPECT_EQ(document.replaceAll("[$1]"), 1);
+    EXPECT_EQ(document.text(), "[y]");
 }
 
 TEST_F(CoreTest, SearchScopeAndWrap)

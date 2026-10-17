@@ -85,9 +85,9 @@ RegExp::Match RegExp::matchWith(std::string_view subject, size_t offset, unsigne
     return result;
 }
 
-RegExp::Match RegExp::match(std::string_view subject, size_t offset, bool anchored) const
+RegExp::Match RegExp::match(std::string_view subject, size_t offset, bool anchored, bool notEmpty) const
 {
-    return matchWith(subject, offset, anchored ? PCRE2_ANCHORED : 0);
+    return matchWith(subject, offset, (anchored ? PCRE2_ANCHORED : 0) | (notEmpty ? PCRE2_NOTEMPTY_ATSTART : 0));
 }
 
 void RegExp::forEachMatch(std::string_view subject, size_t offset, const std::function<bool(const Match &)> &callback) const

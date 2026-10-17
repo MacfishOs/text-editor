@@ -46,8 +46,9 @@ public:
     const std::string &errorString() const { return m_error; }
     int groupNumber(std::string_view name) const;
 
-    // The first match at or after `offset`; `anchored` only at it.
-    Match match(std::string_view subject, size_t offset = 0, bool anchored = false) const;
+    // The first match at or after `offset`; `anchored` only at it, and
+    // `notEmpty` passes over an empty match there.
+    Match match(std::string_view subject, size_t offset = 0, bool anchored = false, bool notEmpty = false) const;
     // Every match from `offset` on: after an empty match it tries a
     // non-empty one at the same place, then moves on by a character.
     // Returning false stops.
