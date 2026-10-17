@@ -13,6 +13,7 @@
 #include "base/file.h"
 #include "test_support.h"
 #include "ui/application.h"
+#include "ui/drag.h"
 #include "ui/keys.h"
 #include "ui/test_input.h"
 #include "ui/theme.h"
@@ -102,6 +103,26 @@ static std::string readFile(const std::string &path)
 {
     return cutefish::base::file::read(path).value_or(std::string());
 }
+
+// Files dragged in from another client, which answers only when told to.
+class SlowFileOffer : public DropOffer
+{
+public:
+    const std::vector<std::string> &mimeTypes() const override { return m_types; }
+    uint32_t sourceActions() const override { return CopyAction; }
+    void read(const std::string &, std::function<void(std::string data)> done) override { m_done = std::move(done); }
+
+    bool asked() const { return bool(m_done); }
+    void answer(const std::string &data)
+    {
+        if (m_done)
+            std::exchange(m_done, nullptr)(data);
+    }
+
+private:
+    std::vector<std::string> m_types{"text/uri-list"};
+    std::function<void(std::string data)> m_done;
+};
 
 TEST_F(AppTest, OpensFileAndTypes)
 {
@@ -588,4 +609,42 @@ TEST_F(AppTest, QuitDialogSkipsPagesClosedMeanwhile)
     EXPECT_EQ(readFile(first), "edit first\n");
     EXPECT_EQ(readFile(second), "second\n");
     EXPECT_TRUE(m_app->isQuitting());
+}
+
+TEST_F(AppTest, FilesArriveAfterTheirTargetCloses)
+{
+    const std::string late = writeFile("late.txt", "late\n");
+    EditorWindow *window = start({writeFile("a.txt", "a\n"), writeFile("b.txt", "b\n")});
+    ASSERT_TRUE(window);
+    ASSERT_EQ(window->tabCount(), 2);
+
+    // Dropped on the text of a tab that closes before the source answers.
+    SlowFileOffer onText;
+    EditorView *view = editor(window);
+    const PointF middle = at(view, {view->geometry().width / 2, view->geometry().height / 2});
+    TestInput::dragEnter(window->window(), middle, &onText);
+    EXPECT_EQ(TestInput::drop(window->window()), CopyAction);
+    ASSERT_TRUE(onText.asked());
+    window->closeTab(window->currentIndex(), false);
+    TestSupport::wait(5);
+    onText.answer("file://" + late + "\n");
+    EXPECT_EQ(window->tabCount(), 1);
+
+    // Dropped on the tab bar of a window that closes before the source answers.
+    EditorWindow *other = m_app->newWindow();
+    TestInput::configure(other->window(), 900, 640, {true});
+    frame(other);
+    SlowFileOffer onTabs;
+    View *header = other->headerContent();
+    // The free stretch before the menu button.
+    TestInput::dragEnter(other->window(), at(header, {header->geometry().width - 56, header->geometry().height / 2}),
+                         &onTabs);
+    EXPECT_EQ(TestInput::drop(other->window()), CopyAction);
+    ASSERT_TRUE(onTabs.asked());
+    other->requestClose();
+    TestSupport::wait(5);
+    EXPECT_EQ(m_app->windowCount(), 1);
+    onTabs.answer("file://" + late + "\n");
+    EXPECT_EQ(window->tabCount(), 1);
+    EXPECT_FALSE(m_app->findOpenDocument(late).has_value());
 }

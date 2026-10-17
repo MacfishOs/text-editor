@@ -149,7 +149,10 @@ protected:
         }
         if (offer && offer->hasMimeType("text/uri-list")) {
             EditorWindow *window = owner;
-            offer->read("text/uri-list", [window](std::string data) {
+            // The source answers when it likes, maybe after the window closed.
+            offer->read("text/uri-list", [window, alive = std::weak_ptr<bool>(owner->m_alive)](std::string data) {
+                if (alive.expired())
+                    return;
                 std::vector<std::string> paths;
                 for (const std::string &line : strings::split(data, '\n')) {
                     const std::string_view url = strings::trimmed(line);

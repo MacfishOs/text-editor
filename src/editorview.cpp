@@ -1420,8 +1420,8 @@ void EditorView::paste()
     if (!m_document)
         return;
     Document *document = m_document;
-    Clipboard::requestText([this, document](std::string text) {
-        if (m_document == document && !text.empty())
+    Clipboard::requestText([this, document, alive = std::weak_ptr<bool>(m_alive)](std::string text) {
+        if (!alive.expired() && m_document == document && !text.empty())
             typeText(text);
     });
 }
@@ -1712,8 +1712,8 @@ void EditorView::pointerPress(const PointerEvent &event)
         if (Clipboard::supportsSelection() && !m_document->isLocked()) {
             Document *document = m_document;
             Clipboard::requestText(
-                    [this, document, hit](std::string text) {
-                        if (m_document != document || text.empty())
+                    [this, document, hit, alive = std::weak_ptr<bool>(m_alive)](std::string text) {
+                        if (alive.expired() || m_document != document || text.empty())
                             return;
                         m_document->setCursor(hit);
                         typeText(text);
@@ -1837,7 +1837,9 @@ void EditorView::startTextDrag()
     source.data = [text](const std::string &) { return text; };
     source.actions = CopyAction | MoveAction;
     source.context = this;
-    source.onFinished = [this, range](DropAction action) {
+    source.onFinished = [this, range, alive = std::weak_ptr<bool>(m_alive)](DropAction action) {
+        if (alive.expired())
+            return;
         const bool moved = m_dragging && action == MoveAction;
         m_dragging = false;
         // Dropped into another view: this one gives the text up.
@@ -1896,7 +1898,9 @@ uint32_t EditorView::drop(const DragEvent &event)
         return NoAction;
     DropOffer *offer = event.offer;
     if (offer->hasMimeType("text/uri-list")) {
-        offer->read("text/uri-list", [this](std::string data) {
+        offer->read("text/uri-list", [this, alive = std::weak_ptr<bool>(m_alive)](std::string data) {
+            if (alive.expired())
+                return;
             std::vector<std::string> paths;
             for (const std::string &line : cutefish::base::strings::split(data, '\n')) {
                 const std::string_view url = cutefish::base::strings::trimmed(line);
@@ -1953,8 +1957,8 @@ uint32_t EditorView::drop(const DragEvent &event)
             : offer->hasMimeType("text/plain")                               ? "text/plain"
                                                                                : "UTF8_STRING";
     Document *document = m_document;
-    offer->read(type, [this, document, position](std::string text) {
-        if (m_document != document || text.empty() || m_document->isLocked())
+    offer->read(type, [this, document, position, alive = std::weak_ptr<bool>(m_alive)](std::string text) {
+        if (alive.expired() || m_document != document || text.empty() || m_document->isLocked())
             return;
         const TextPosition at = m_document->buffer().clamp(position);
         const TextPosition endAt = TextBuffer::endOf(at, text);

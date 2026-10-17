@@ -304,6 +304,8 @@ private:
     std::unique_ptr<cutefish::ui::Scroller> m_scroller;
     cutefish::ui::ScrollBar *m_verticalBar;
     cutefish::ui::ScrollBar *m_horizontalBar;
+    // Clipboard and drop answers come from other clients, maybe after the view is gone.
+    std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
 };
 
 #endif
