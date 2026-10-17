@@ -98,8 +98,10 @@ public:
         DialogButton *discard = actions->addChild<DialogButton>(pages.size() > 1 ? "Discard All" : "Don't Save");
         discard->setDestructive(true);
         discard->onClicked = [&dialog] {
-            for (EditorPage *page : dialog.m_pages)
-                page->document().removeDraft();
+            for (EditorPage *page : dialog.m_pages) {
+                if (!dialog.lifetimeOf(page).expired())
+                    page->document().removeDraft();
+            }
             dialog.finish(true);
         };
         m_save = actions->addChild<DialogButton>("Save", true);
@@ -138,6 +140,9 @@ void SaveChangesDialog::ask(const std::vector<EditorPage *> &pages, std::functio
 {
     release();
     m_pages = pages;
+    m_lifetimes.clear();
+    for (EditorPage *page : pages)
+        m_lifetimes.push_back(page->lifetime());
     m_checked = pages;
     m_action = std::move(then);
     const std::string title = pages.size() == 1
@@ -168,6 +173,12 @@ void SaveChangesDialog::ask(const std::vector<EditorPage *> &pages, std::functio
     m_window->show();
 }
 
+std::weak_ptr<bool> SaveChangesDialog::lifetimeOf(const EditorPage *page) const
+{
+    const auto it = std::find(m_pages.begin(), m_pages.end(), page);
+    return it == m_pages.end() ? std::weak_ptr<bool>() : m_lifetimes[size_t(it - m_pages.begin())];
+}
+
 void SaveChangesDialog::release()
 {
     releaseLater(m_window);
@@ -185,31 +196,44 @@ void SaveChangesDialog::finish(bool proceed)
 // Saves the checked documents one after another; a cancelled Save As stops it.
 void SaveChangesDialog::saveChecked()
 {
-    auto queue = std::make_shared<std::vector<EditorPage *>>(m_checked);
-    std::vector<EditorPage *> unchecked;
+    // Another window may close one of the pages while they are saved.
+    using TrackedPage = std::pair<EditorPage *, std::weak_ptr<bool>>;
+    auto queue = std::make_shared<std::vector<TrackedPage>>();
+    for (EditorPage *page : m_checked)
+        queue->emplace_back(page, lifetimeOf(page));
+    std::vector<TrackedPage> unchecked;
     for (EditorPage *page : m_pages) {
         if (std::find(m_checked.begin(), m_checked.end(), page) == m_checked.end())
-            unchecked.push_back(page);
+            unchecked.emplace_back(page, lifetimeOf(page));
     }
     if (m_window)
         m_window->hide();
+    // Only the save waiting to finish holds the chain; it holds itself weakly.
     auto next = std::make_shared<std::function<void()>>();
-    *next = [this, queue, unchecked, next, alive = std::weak_ptr<bool>(m_alive)] {
+    const std::weak_ptr<std::function<void()>> self = next;
+    *next = [this, queue, unchecked, self, alive = std::weak_ptr<bool>(m_alive)] {
         if (alive.expired())
             return;
         if (queue->empty()) {
-            for (EditorPage *page : unchecked)
-                page->document().removeDraft();
+            for (const auto &[page, lifetime] : unchecked) {
+                if (!lifetime.expired())
+                    page->document().removeDraft();
+            }
             finish(true);
             return;
         }
-        EditorPage *page = queue->front();
+        const auto [page, lifetime] = queue->front();
         queue->erase(queue->begin());
         if (!onSaveRequested) {
             finish(false);
             return;
         }
-        onSaveRequested(page, [next](bool saved) {
+        if (lifetime.expired()) {
+            if (const auto again = self.lock())
+                (*again)();
+            return;
+        }
+        onSaveRequested(page, [next = self.lock()](bool saved) {
             if (saved)
                 (*next)();
         });

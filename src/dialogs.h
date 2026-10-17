@@ -38,10 +38,13 @@ private:
     void finish(bool proceed);
     void saveChecked();
     void release();
+    // Expired once the page is closed, which another window may do meanwhile.
+    std::weak_ptr<bool> lifetimeOf(const EditorPage *page) const;
 
     cutefish::ui::Window *m_parent;
     std::unique_ptr<cutefish::ui::Window> m_window;
     std::vector<EditorPage *> m_pages;
+    std::vector<std::weak_ptr<bool>> m_lifetimes;
     std::vector<EditorPage *> m_checked;
     std::function<void()> m_action;
     std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);

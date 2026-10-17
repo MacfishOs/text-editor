@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -83,6 +84,24 @@ protected:
     std::unique_ptr<EditorSettings> m_settings;
     std::unique_ptr<EditorApplication> m_app;
 };
+
+// The shown window that is none of the editor's: the dialog asking about unsaved changes.
+static Window *openDialog(EditorApplication &application)
+{
+    for (Window *window : cutefish::ui::Application::instance()->windows()) {
+        if (window->isHidden())
+            continue;
+        const std::vector<EditorWindow *> windows = application.windows();
+        if (std::none_of(windows.begin(), windows.end(), [window](EditorWindow *w) { return &w->window() == window; }))
+            return window;
+    }
+    return nullptr;
+}
+
+static std::string readFile(const std::string &path)
+{
+    return cutefish::base::file::read(path).value_or(std::string());
+}
 
 TEST_F(AppTest, OpensFileAndTypes)
 {
@@ -510,4 +529,63 @@ TEST_F(AppTest, LargeFilePerformance)
                 loadMs, firstMs, typingMs / 50, editMs / 200, enterMs / 20, scrollMs / 50, jumpMs);
     EXPECT_LT(typingMs / 50, 50);
     EXPECT_LT(scrollMs / 50, 100);
+}
+
+TEST_F(AppTest, SaveAllAndSaveChanges)
+{
+    const std::string one = writeFile("one.txt", "one\n");
+    const std::string two = writeFile("two.txt", "two\n");
+    EditorWindow *window = start({one, two});
+    ASSERT_TRUE(window);
+    ASSERT_EQ(window->tabCount(), 2);
+    for (EditorPage *page : window->pages())
+        page->document().insertText("more ");
+    window->saveAll();
+    for (EditorPage *page : window->pages())
+        EXPECT_FALSE(page->document().isModified());
+    EXPECT_EQ(readFile(one), "more one\n");
+    EXPECT_EQ(readFile(two), "more two\n");
+
+    // Return saves in the dialog that closing a modified tab asks.
+    window->pages().front()->document().insertText("again ");
+    window->closeTab(0);
+    Window *dialog = openDialog(*m_app);
+    ASSERT_TRUE(dialog);
+    TestInput::setKeyboardFocus(*dialog, true);
+    TestInput::typeKey(*dialog, key::Return);
+    TestSupport::wait(5);
+    EXPECT_EQ(window->tabCount(), 1);
+    EXPECT_EQ(readFile(one), "more again one\n");
+}
+
+TEST_F(AppTest, QuitDialogSkipsPagesClosedMeanwhile)
+{
+    m_settings->restoreSession = false;
+    const std::string first = writeFile("first.txt", "first\n");
+    const std::string second = writeFile("second.txt", "second\n");
+    EditorWindow *window = start({first});
+    ASSERT_TRUE(window);
+    window->currentPage()->document().insertText("edit ");
+    EditorWindow::Options options;
+    options.initialTabs = {TabState{}};
+    options.initialTabs.front().path = second;
+    options.initialTabs.front().draftId = "second";
+    EditorWindow *other = m_app->newWindow(std::move(options));
+    other->currentPage()->document().waitForLoaded();
+    other->currentPage()->document().insertText("edit ");
+
+    // Both pages are asked about; the other window then closes its page without saving.
+    window->quitApplication();
+    Window *dialog = openDialog(*m_app);
+    ASSERT_TRUE(dialog);
+    other->closeTab(0, false);
+    TestSupport::wait(5);
+    EXPECT_EQ(m_app->windowCount(), 1);
+
+    TestInput::setKeyboardFocus(*dialog, true);
+    TestInput::typeKey(*dialog, key::Return);
+    TestSupport::wait(5);
+    EXPECT_EQ(readFile(first), "edit first\n");
+    EXPECT_EQ(readFile(second), "second\n");
+    EXPECT_TRUE(m_app->isQuitting());
 }

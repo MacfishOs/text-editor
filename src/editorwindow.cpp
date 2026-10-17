@@ -803,19 +803,27 @@ void EditorWindow::saveAs(EditorPage *page, std::function<void(bool, bool)> done
 
 void EditorWindow::saveAll()
 {
-    auto dirty = std::make_shared<std::vector<EditorPage *>>();
+    // A page may be closed while an earlier one is saved as.
+    auto dirty = std::make_shared<std::vector<std::pair<EditorPage *, std::weak_ptr<bool>>>>();
     for (EditorPage *page : m_pages) {
         if (page->document().isModified())
-            dirty->push_back(page);
+            dirty->emplace_back(page, page->lifetime());
     }
     // A failed save shows its notice on its page; only a cancelled dialog stops the rest.
+    // Only the save waiting to finish holds the chain; it holds itself weakly.
     auto next = std::make_shared<std::function<void()>>();
-    *next = [this, dirty, next, alive = std::weak_ptr<bool>(m_alive)] {
+    const std::weak_ptr<std::function<void()>> self = next;
+    *next = [this, dirty, self, alive = std::weak_ptr<bool>(m_alive)] {
         if (alive.expired() || dirty->empty())
             return;
-        EditorPage *page = dirty->front();
+        const auto [page, lifetime] = dirty->front();
         dirty->erase(dirty->begin());
-        savePage(page, [next](bool, bool cancelled) {
+        if (lifetime.expired()) {
+            if (const auto again = self.lock())
+                (*again)();
+            return;
+        }
+        savePage(page, [next = self.lock()](bool, bool cancelled) {
             if (!cancelled)
                 (*next)();
         });

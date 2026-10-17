@@ -84,6 +84,8 @@ public:
     GoToLineBar *goToLineIfMade() const { return m_goToLine; }
     StatusBar &statusBar() const { return *m_statusBar; }
     InfoBar &infoBar() const { return *m_infoBar; }
+    // Expires with the page, for callbacks that may outlive it.
+    std::weak_ptr<bool> lifetime() const { return m_alive; }
 
     // The title or the modified state changed.
     cutefish::base::Signal<> tabChanged;
