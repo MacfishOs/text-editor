@@ -543,6 +543,8 @@ void EditorView::onLinesChanged(int line, int removed, int added)
                 m_staleCaches[m_lines[size_t(i)].id] = std::move(cached->second);
             m_caches.erase(cached);
         }
+        if (i >= line + kept)
+            m_staleCaches.erase(m_lines[size_t(i)].id);
         // Only losing the widest line needs a recount.
         if (m_lines[size_t(i)].columns >= oldMax && (i >= line + kept || displayColumns(buffer.line(i)) < oldMax))
             m_maxColumnsDirty = true;
@@ -765,17 +767,19 @@ void EditorView::buildLayout(int line, LineCache *cache, LineCache *previous)
 void EditorView::dropFarCaches(int first, int last)
 {
     const size_t keep = size_t(std::max(200, (last - first + 1) * 3));
-    if (m_caches.size() <= keep)
+    if (m_caches.size() + m_staleCaches.size() <= keep)
         return;
     const int margin = last - first + 1;
     std::unordered_set<uint32_t> wanted;
     for (int i = std::max(0, first - margin); i <= last + margin && i < int(m_lines.size()); ++i)
         wanted.insert(m_lines[size_t(i)].id);
-    for (auto it = m_caches.begin(); it != m_caches.end();) {
-        if (!wanted.count(it->first))
-            it = m_caches.erase(it);
-        else
-            ++it;
+    for (auto *caches : {&m_caches, &m_staleCaches}) {
+        for (auto it = caches->begin(); it != caches->end();) {
+            if (!wanted.count(it->first))
+                it = caches->erase(it);
+            else
+                ++it;
+        }
     }
 }
 
