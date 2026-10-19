@@ -117,8 +117,8 @@ int main(int argc, char **argv)
     if (!application.registerService()) {
 #endif
         // A running editor takes the files and this process ends.
-        dbus::Proxy existing(dbus::Connection::session(), "com.cutefish.TextEditor", "/TextEditor",
-                             "com.cutefish.TextEditor");
+        dbus::Proxy existing(dbus::Connection::session(), "org.cutefish.TextEditor", "/TextEditor",
+                             "org.cutefish.TextEditor");
         existing.setTimeout(std::chrono::seconds(5));
         if (newWindow)
             existing.call("NewWindow");

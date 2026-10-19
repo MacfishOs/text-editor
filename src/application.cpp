@@ -24,7 +24,7 @@ namespace strings = cutefish::base::strings;
 namespace dbus = cutefish::base::dbus;
 
 static constexpr size_t closedTabLimit = 20;
-static constexpr const char *serviceName = "com.cutefish.TextEditor";
+static constexpr const char *serviceName = "org.cutefish.TextEditor";
 static constexpr const char *servicePath = "/TextEditor";
 
 // Shown as it is, so a maximized window stays maximized.

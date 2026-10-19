@@ -84,7 +84,7 @@ public:
     void open(const std::vector<std::string> &arguments, const std::string &workingDirectory);
     void openText(const std::string &text);
     void newWindowFromBus();
-    // Registers com.cutefish.TextEditor; false when another process has it.
+    // Registers org.cutefish.TextEditor; false when another process has it.
     bool registerService();
 
     cutefish::base::Signal<> closedTabsChanged;
