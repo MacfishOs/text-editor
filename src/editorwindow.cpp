@@ -10,6 +10,7 @@
 #include "pagebars.h"
 
 #include "base/event_loop.h"
+#include "base/i18n.h"
 #include "base/strings.h"
 #include "base/url.h"
 #include "ui/drag.h"
@@ -33,6 +34,9 @@
 #include <filesystem>
 
 using namespace cutefish::ui;
+using cutefish::i18n::format;
+using cutefish::i18n::tr;
+using cutefish::i18n::trn;
 namespace strings = cutefish::base::strings;
 
 static constexpr double headerHeight = 40;
@@ -503,7 +507,7 @@ void EditorWindow::moveTab(int from, int to)
 void EditorWindow::updateTitle()
 {
     const EditorPage *page = currentPage();
-    m_window->setTitle(page ? page->title() : "Text Editor");
+    m_window->setTitle(page ? page->title() : tr("Text Editor"));
 }
 
 int EditorWindow::indexOfPath(const std::string &absolute, const std::string &canonical) const
@@ -768,7 +772,7 @@ void EditorWindow::saveAs(EditorPage *page, std::function<void(bool, bool)> done
         }
         name = std::string(strings::trimmed(title));
         if (name.empty())
-            name = "Untitled";
+            name = tr("Untitled");
         if (name.find('.') == std::string::npos)
             name += ".txt";
     } else {
@@ -777,7 +781,7 @@ void EditorWindow::saveAs(EditorPage *page, std::function<void(bool, bool)> done
 
     m_saveChooser = std::make_unique<FileChooser>(m_window.get());
     m_saveChooser->setMode(FileChooser::Mode::SaveFile);
-    m_saveChooser->setTitle("Save As");
+    m_saveChooser->setTitle(tr("Save As"));
     if (!folder.empty())
         m_saveChooser->setCurrentFolder(folder);
     m_saveChooser->setCurrentFile((folder.empty() ? std::string() : folder) + "/" + name);
@@ -837,7 +841,7 @@ void EditorWindow::openDialog()
 {
     m_openChooser = std::make_unique<FileChooser>(m_window.get());
     m_openChooser->setMode(FileChooser::Mode::OpenFiles);
-    m_openChooser->setTitle("Open");
+    m_openChooser->setTitle(tr("Open"));
     const EditorPage *page = currentPage();
     if (page && !page->document().isUntitled())
         m_openChooser->setCurrentFolder(std::filesystem::path(page->document().filePath()).parent_path().string());
@@ -858,8 +862,8 @@ void EditorWindow::showMainMenu()
     Menu *recent = nullptr;
     Menu *edit = nullptr;
     Menu *view = nullptr;
-    menu.addItem("Open\xE2\x80\xA6", [this] { openDialog(); }, "Ctrl+O");
-    recent = menu.addSubmenu("Open Recent");
+    menu.addItem(tr("Open\xE2\x80\xA6"), [this] { openDialog(); }, "Ctrl+O");
+    recent = menu.addSubmenu(tr("Open Recent"));
     menu.setItemEnabled(1, !m_application.recentFiles().files().empty());
     for (const std::string &path : m_application.recentFiles().files()) {
         recent->addItem(std::filesystem::path(path).filename().string(), [this, path] {
@@ -867,64 +871,65 @@ void EditorWindow::showMainMenu()
         });
     }
     recent->addSeparator();
-    recent->addItem("Clear Recent Files", [this] { m_application.recentFiles().clear(); });
+    recent->addItem(tr("Clear Recent Files"), [this] { m_application.recentFiles().clear(); });
     menu.addSeparator();
-    menu.addItem("New Tab", [this] { newTab(); }, "Ctrl+T");
-    menu.addItem("New Window", [this] { m_application.newWindow(); }, "Ctrl+N");
-    menu.setItemEnabled(menu.addItem("Reopen Closed Tab", [this] { reopenClosedTab(); }, "Ctrl+Shift+T"),
+    menu.addItem(tr("New Tab"), [this] { newTab(); }, "Ctrl+T");
+    menu.addItem(tr("New Window"), [this] { m_application.newWindow(); }, "Ctrl+N");
+    menu.setItemEnabled(menu.addItem(tr("Reopen Closed Tab"), [this] { reopenClosedTab(); }, "Ctrl+Shift+T"),
                         m_application.canReopenClosedTab());
     menu.addSeparator();
-    menu.setItemEnabled(menu.addItem("Save", [this] { savePage(currentPage()); }, "Ctrl+S"), document != nullptr);
-    menu.setItemEnabled(menu.addItem("Save As\xE2\x80\xA6", [this] { saveAs(currentPage()); }, "Ctrl+Shift+S"),
+    menu.setItemEnabled(menu.addItem(tr("Save"), [this] { savePage(currentPage()); }, "Ctrl+S"), document != nullptr);
+    menu.setItemEnabled(menu.addItem(tr("Save As\xE2\x80\xA6"), [this] { saveAs(currentPage()); }, "Ctrl+Shift+S"),
                         document != nullptr);
-    menu.addItem("Save All", [this] { saveAll(); }, "Ctrl+Alt+S");
-    menu.setItemEnabled(menu.addItem("Revert to Saved\xE2\x80\xA6",
+    menu.addItem(tr("Save All"), [this] { saveAll(); }, "Ctrl+Alt+S");
+    menu.setItemEnabled(menu.addItem(tr("Revert to Saved\xE2\x80\xA6"),
                                      [this] {
                                          if (EditorPage *current = currentPage())
                                              current->revert();
                                      }),
                         document && !document->isUntitled() && document->isModified());
-    menu.addItem("Close Tab", [this] { closeCurrentTab(); }, "Ctrl+W");
+    menu.addItem(tr("Close Tab"), [this] { closeCurrentTab(); }, "Ctrl+W");
     menu.addSeparator();
-    menu.addItem("Find\xE2\x80\xA6", [this] {
+    menu.addItem(tr("Find\xE2\x80\xA6"), [this] {
         if (EditorPage *current = currentPage())
             current->showFind(false);
     }, "Ctrl+F");
-    menu.addItem("Replace\xE2\x80\xA6", [this] {
+    menu.addItem(tr("Replace\xE2\x80\xA6"), [this] {
         if (EditorPage *current = currentPage())
             current->showFind(true);
     }, "Ctrl+H");
-    menu.addItem("Go to Line\xE2\x80\xA6", [this] {
+    menu.addItem(tr("Go to Line\xE2\x80\xA6"), [this] {
         if (EditorPage *current = currentPage())
             current->showGoToLine();
     }, "Ctrl+I");
     menu.addSeparator();
 
-    edit = menu.addSubmenu("Edit");
+    edit = menu.addSubmenu(tr("Edit"));
     const auto onDocument = [this](std::function<void(Document &)> action) {
         return [this, action] {
             if (EditorPage *current = currentPage())
                 action(current->document());
         };
     };
-    edit->setItemEnabled(edit->addItem("Undo", onDocument([](Document &d) { d.undo(); }), "Ctrl+Z"),
+    edit->setItemEnabled(edit->addItem(tr("Undo"), onDocument([](Document &d) { d.undo(); }), "Ctrl+Z"),
                          document && document->canUndo());
-    edit->setItemEnabled(edit->addItem("Redo", onDocument([](Document &d) { d.redo(); }), "Ctrl+Shift+Z"),
+    edit->setItemEnabled(edit->addItem(tr("Redo"), onDocument([](Document &d) { d.redo(); }), "Ctrl+Shift+Z"),
                          document && document->canRedo());
     edit->addSeparator();
-    edit->addItem("Duplicate Line", onDocument([](Document &d) { d.duplicateLines(); }), "Ctrl+Alt+D");
-    edit->addItem("Delete Line", onDocument([](Document &d) { d.deleteLines(); }), "Ctrl+D");
-    edit->addItem("Move Line Up", onDocument([](Document &d) { d.moveLines(true); }), "Alt+Up");
-    edit->addItem("Move Line Down", onDocument([](Document &d) { d.moveLines(false); }), "Alt+Down");
+    edit->addItem(tr("Duplicate Line"), onDocument([](Document &d) { d.duplicateLines(); }), "Ctrl+Alt+D");
+    edit->addItem(tr("Delete Line"), onDocument([](Document &d) { d.deleteLines(); }), "Ctrl+D");
+    edit->addItem(tr("Move Line Up"), onDocument([](Document &d) { d.moveLines(true); }), "Alt+Up");
+    edit->addItem(tr("Move Line Down"), onDocument([](Document &d) { d.moveLines(false); }), "Alt+Down");
     edit->addSeparator();
-    edit->addItem("UPPERCASE", onDocument([](Document &d) { d.changeCase(Document::Upper); }), "Ctrl+U");
-    edit->addItem("lowercase", onDocument([](Document &d) { d.changeCase(Document::Lower); }), "Ctrl+Shift+U");
-    edit->addItem("Title Case", onDocument([](Document &d) { d.changeCase(Document::Title); }));
+    // TRANSLATORS: changes the selection to upper case; written in the case it applies, as are "lowercase" and "Title Case".
+    edit->addItem(tr("UPPERCASE"), onDocument([](Document &d) { d.changeCase(Document::Upper); }), "Ctrl+U");
+    edit->addItem(tr("lowercase"), onDocument([](Document &d) { d.changeCase(Document::Lower); }), "Ctrl+Shift+U");
+    edit->addItem(tr("Title Case"), onDocument([](Document &d) { d.changeCase(Document::Title); }));
     edit->addSeparator();
-    edit->addItem("Indent", onDocument([](Document &d) { d.indentSelection(false); }), "Tab");
-    edit->addItem("Unindent", onDocument([](Document &d) { d.indentSelection(true); }), "Shift+Tab");
+    edit->addItem(tr("Indent"), onDocument([](Document &d) { d.indentSelection(false); }), "Tab");
+    edit->addItem(tr("Unindent"), onDocument([](Document &d) { d.indentSelection(true); }), "Shift+Tab");
 
-    view = menu.addSubmenu("View");
+    view = menu.addSubmenu(tr("View"));
     EditorSettings &settings = m_application.settings();
     const auto toggle = [&settings](bool EditorSettings::*member) {
         return [&settings, member] {
@@ -932,25 +937,25 @@ void EditorWindow::showMainMenu()
             settings.commit();
         };
     };
-    view->setItemChecked(view->addItem("Word Wrap", toggle(&EditorSettings::wordWrap), "Alt+W"), settings.wordWrap);
-    view->setItemChecked(view->addItem("Line Numbers", toggle(&EditorSettings::lineNumbers)), settings.lineNumbers);
-    view->setItemChecked(view->addItem("Highlight Current Line", toggle(&EditorSettings::highlightCurrentLine)),
+    view->setItemChecked(view->addItem(tr("Word Wrap"), toggle(&EditorSettings::wordWrap), "Alt+W"), settings.wordWrap);
+    view->setItemChecked(view->addItem(tr("Line Numbers"), toggle(&EditorSettings::lineNumbers)), settings.lineNumbers);
+    view->setItemChecked(view->addItem(tr("Highlight Current Line"), toggle(&EditorSettings::highlightCurrentLine)),
                          settings.highlightCurrentLine);
-    view->setItemChecked(view->addItem("Show Whitespace", toggle(&EditorSettings::showWhitespace)),
+    view->setItemChecked(view->addItem(tr("Show Whitespace"), toggle(&EditorSettings::showWhitespace)),
                          settings.showWhitespace);
-    view->setItemChecked(view->addItem("Match Brackets", toggle(&EditorSettings::matchBrackets)), settings.matchBrackets);
+    view->setItemChecked(view->addItem(tr("Match Brackets"), toggle(&EditorSettings::matchBrackets)), settings.matchBrackets);
     view->addSeparator();
-    view->addItem("Zoom In", [this] { zoomBy(1); }, "Ctrl+=");
-    view->addItem("Zoom Out", [this] { zoomBy(-1); }, "Ctrl+-");
-    view->setItemEnabled(view->addItem("Actual Size", [this] { zoomBy(0); }, "Ctrl+0"), m_zoom != 1);
-    view->setItemChecked(view->addItem("Full Screen", [this] { toggleFullScreen(); }, "F11"), isFullScreen());
+    view->addItem(tr("Zoom In"), [this] { zoomBy(1); }, "Ctrl+=");
+    view->addItem(tr("Zoom Out"), [this] { zoomBy(-1); }, "Ctrl+-");
+    view->setItemEnabled(view->addItem(tr("Actual Size"), [this] { zoomBy(0); }, "Ctrl+0"), m_zoom != 1);
+    view->setItemChecked(view->addItem(tr("Full Screen"), [this] { toggleFullScreen(); }, "F11"), isFullScreen());
 
     menu.addSeparator();
-    menu.addItem("Document Statistics", [this] { showStatistics(); });
+    menu.addItem(tr("Document Statistics"), [this] { showStatistics(); });
     menu.addSeparator();
-    menu.addItem("Settings", [this] { showPreferences(); }, "Ctrl+,");
-    menu.addItem("Keyboard Shortcuts", [this] { showShortcuts(); }, "Ctrl+?");
-    menu.addItem("About Text Editor", [this] { showAbout(); });
+    menu.addItem(tr("Settings"), [this] { showPreferences(); }, "Ctrl+,");
+    menu.addItem(tr("Keyboard Shortcuts"), [this] { showShortcuts(); }, "Ctrl+?");
+    menu.addItem(tr("About Text Editor"), [this] { showAbout(); });
 
     menu.onClosed = [this, alive = std::weak_ptr<bool>(m_alive)] {
         if (!alive.expired())
@@ -989,15 +994,19 @@ void EditorWindow::showStatistics()
     if (!page)
         return;
     const DocumentStatistics stats = page->document().statistics();
-    std::string text = "Lines: " + localeNumber(stats.lines) + "\nWords: " + localeNumber(stats.words)
-            + "\nCharacters: " + localeNumber(stats.characters)
-            + "\nCharacters without spaces: " + localeNumber(stats.charactersWithoutSpaces);
+    std::string text = format(tr("Lines: {count}"), {{"count", localeNumber(stats.lines)}}) + "\n"
+            + format(tr("Words: {count}"), {{"count", localeNumber(stats.words)}}) + "\n"
+            + format(tr("Characters: {count}"), {{"count", localeNumber(stats.characters)}}) + "\n"
+            + format(tr("Characters without spaces: {count}"), {{"count", localeNumber(stats.charactersWithoutSpaces)}});
     if (stats.hasSelection)
-        text += "\n\nSelection: " + std::to_string(stats.selectionLines) + " lines, " + std::to_string(stats.selectionWords)
-                + " words, " + std::to_string(stats.selectionCharacters) + " characters";
+        // TRANSLATORS: each value is a count with its noun, such as "3 lines".
+        text += "\n\n" + format(tr("Selection: {lines}, {words}, {characters}"),
+                                {{"lines", trn("{n} line", "{n} lines", uint64_t(stats.selectionLines))},
+                                 {"words", trn("{n} word", "{n} words", uint64_t(stats.selectionWords))},
+                                 {"characters", trn("{n} character", "{n} characters", uint64_t(stats.selectionCharacters))}});
     m_statistics = std::make_unique<ConfirmDialog>(m_window.get(), page->title(), text);
     m_statistics->setCancelVisible(false);
-    m_statistics->setConfirmText("OK");
+    m_statistics->setConfirmText(tr("OK"));
     m_statistics->show();
 }
 
@@ -1037,7 +1046,7 @@ void EditorWindow::openTabMenu(int index, PointF position)
     m_tabMenuIndex = index;
     m_tabMenu = std::make_unique<Menu>();
     const std::string path = m_pages[size_t(index)]->document().filePath();
-    const size_t move = m_tabMenu->addItem("Move to New Window", [this] {
+    const size_t move = m_tabMenu->addItem(tr("Move to New Window"), [this] {
         cutefish::base::EventLoop::current()->post([this, index = m_tabMenuIndex, alive = std::weak_ptr<bool>(m_alive)] {
             if (!alive.expired())
                 moveToNewWindow(index);
@@ -1046,15 +1055,15 @@ void EditorWindow::openTabMenu(int index, PointF position)
     m_tabMenu->setItemEnabled(move, m_pages.size() > 1);
     if (!path.empty()) {
         EditorApplication &application = m_application;
-        m_tabMenu->addItem("Copy Path", [&application, path] { application.copyText(path); });
-        m_tabMenu->addItem("Show in Folder", [&application, path] { application.showInFileManager(path); });
+        m_tabMenu->addItem(tr("Copy Path"), [&application, path] { application.copyText(path); });
+        m_tabMenu->addItem(tr("Show in Folder"), [&application, path] { application.showInFileManager(path); });
     }
     m_tabMenu->addSeparator();
-    m_tabMenu->addItem("Close Tab", [this] { closeTab(m_tabMenuIndex); }, "Ctrl+W");
+    m_tabMenu->addItem(tr("Close Tab"), [this] { closeTab(m_tabMenuIndex); }, "Ctrl+W");
     if (m_pages.size() > 1)
-        m_tabMenu->addItem("Close Other Tabs", [this] { closeOtherTabs(m_tabMenuIndex); });
+        m_tabMenu->addItem(tr("Close Other Tabs"), [this] { closeOtherTabs(m_tabMenuIndex); });
     if (index < int(m_pages.size()) - 1)
-        m_tabMenu->addItem("Close Tabs to the Right", [this] { closeTabsToRight(m_tabMenuIndex); });
+        m_tabMenu->addItem(tr("Close Tabs to the Right"), [this] { closeTabsToRight(m_tabMenuIndex); });
     m_tabMenu->popup(m_window.get(), position);
 }
 

@@ -7,6 +7,7 @@
 #include "editorsettings.h"
 
 #include "base/event_loop.h"
+#include "base/i18n.h"
 #include "base/process.h"
 #include "ui/application.h"
 #include "ui/check_box.h"
@@ -30,6 +31,10 @@
 #include <map>
 
 using namespace cutefish::ui;
+using cutefish::i18n::format;
+using cutefish::i18n::tr;
+using cutefish::i18n::trn;
+using cutefish::i18n::trNoop;
 
 // Destroys a window from the event loop, after the event being handled.
 static void releaseLater(std::unique_ptr<Window> &window)
@@ -66,7 +71,7 @@ public:
         titleLabel->setWeight(600);
         titleLabel->setWrap(true);
         titleLabel->setLayoutHints({.fillWidth = true});
-        Label *text = texts->addChild<Label>("If you don't save, your changes will be lost.");
+        Label *text = texts->addChild<Label>(tr("If you don't save, your changes will be lost."));
         text->setFontSize(14);
         text->setColor(ColorId::DisabledText);
         text->setWrap(true);
@@ -93,9 +98,9 @@ public:
         auto *actions = m_column->addChild<Row>();
         actions->setSpacing(8);
         actions->setLayoutHints({.alignment = Alignment::End});
-        DialogButton *cancel = actions->addChild<DialogButton>("Cancel");
+        DialogButton *cancel = actions->addChild<DialogButton>(tr("Cancel"));
         cancel->onClicked = [&dialog] { dialog.finish(false); };
-        DialogButton *discard = actions->addChild<DialogButton>(pages.size() > 1 ? "Discard All" : "Don't Save");
+        DialogButton *discard = actions->addChild<DialogButton>(pages.size() > 1 ? tr("Discard All") : tr("Don't Save"));
         discard->setDestructive(true);
         discard->onClicked = [&dialog] {
             for (EditorPage *page : dialog.m_pages) {
@@ -104,7 +109,7 @@ public:
             }
             dialog.finish(true);
         };
-        m_save = actions->addChild<DialogButton>("Save", true);
+        m_save = actions->addChild<DialogButton>(tr("Save"), true);
         m_save->onClicked = [&dialog] { dialog.saveChecked(); };
 
         m_header->setButtonMargin(8);
@@ -146,8 +151,8 @@ void SaveChangesDialog::ask(const std::vector<EditorPage *> &pages, std::functio
     m_checked = pages;
     m_action = std::move(then);
     const std::string title = pages.size() == 1
-            ? "Save changes to \xE2\x80\x9C" + pages.front()->title() + "\xE2\x80\x9D?"
-            : "Save changes to " + std::to_string(pages.size()) + " documents?";
+            ? format(tr("Save changes to \xE2\x80\x9C{name}\xE2\x80\x9D?"), {{"name", pages.front()->title()}})
+            : trn("Save changes to {n} document?", "Save changes to {n} documents?", pages.size());
 
     m_window = std::make_unique<Window>();
     m_window->setBackgroundColor(ColorId::SecondBackground);
@@ -336,12 +341,12 @@ public:
         : m_application(application)
         , m_settings(application.settings())
     {
-        m_families = {"System Monospace"};
+        m_families = {tr("System Monospace")};
         for (const std::string &family : application.monospaceFamilies())
             m_families.push_back(family);
 
         Card *fonts = addCard();
-        ComboBox *font = addRow(fonts, "Font", false)->setControl<ComboBox>(200, m_families);
+        ComboBox *font = addRow(fonts, tr("Font"), false)->setControl<ComboBox>(200, m_families);
         const auto familyAt = std::find(m_families.begin() + 1, m_families.end(), m_settings.fontFamily);
         font->setCurrentIndex(m_settings.fontFamily.empty() || familyAt == m_families.end() ? 0 : int(familyAt - m_families.begin()));
         font->onActivated = [this](int index) {
@@ -350,8 +355,9 @@ public:
         };
         std::vector<std::string> sizeNames;
         for (const int size : sizes)
-            sizeNames.push_back(size == 0 ? "System" : std::to_string(size) + " pt");
-        ComboBox *size = addRow(fonts, "Size", true)->setControl<ComboBox>(200, sizeNames);
+            // TRANSLATORS: the system's default font size, first in a list of sizes in points.
+            sizeNames.push_back(size == 0 ? tr("System") : format(tr("{size} pt"), {{"size", std::to_string(size)}}));
+        ComboBox *size = addRow(fonts, tr("Size"), true)->setControl<ComboBox>(200, sizeNames);
         const auto sizeAt = std::find(std::begin(sizes), std::end(sizes), int(std::lround(m_settings.fontSize)));
         size->setCurrentIndex(sizeAt == std::end(sizes) || m_settings.fontSize != double(*sizeAt) ? 0 : int(sizeAt - std::begin(sizes)));
         size->onActivated = [this](int index) {
@@ -363,25 +369,25 @@ public:
         std::vector<std::string> widthNames;
         for (const int width : tabWidths)
             widthNames.push_back(std::to_string(width));
-        ComboBox *tabWidth = addRow(indentation, "Tab Width", false)->setControl<ComboBox>(200, widthNames);
+        ComboBox *tabWidth = addRow(indentation, tr("Tab Width"), false)->setControl<ComboBox>(200, widthNames);
         const auto widthAt = std::find(std::begin(tabWidths), std::end(tabWidths), m_settings.tabWidth);
         tabWidth->setCurrentIndex(widthAt == std::end(tabWidths) ? 0 : int(widthAt - std::begin(tabWidths)));
         tabWidth->onActivated = [this](int index) {
             m_settings.tabWidth = tabWidths[index];
             m_settings.commit();
         };
-        addSwitch(indentation, "Insert Spaces Instead of Tabs", &EditorSettings::insertSpaces, false);
-        addSwitch(indentation, "Automatic Indentation", &EditorSettings::autoIndent, true);
+        addSwitch(indentation, tr("Insert Spaces Instead of Tabs"), &EditorSettings::insertSpaces, false);
+        addSwitch(indentation, tr("Automatic Indentation"), &EditorSettings::autoIndent, true);
 
         Card *view = addCard();
-        addSwitch(view, "Wrap Lines", &EditorSettings::wordWrap, false);
-        addSwitch(view, "Line Numbers", &EditorSettings::lineNumbers, false);
-        addSwitch(view, "Highlight Current Line", &EditorSettings::highlightCurrentLine, false);
-        addSwitch(view, "Show Whitespace", &EditorSettings::showWhitespace, false);
-        addSwitch(view, "Match Brackets", &EditorSettings::matchBrackets, true);
+        addSwitch(view, tr("Wrap Lines"), &EditorSettings::wordWrap, false);
+        addSwitch(view, tr("Line Numbers"), &EditorSettings::lineNumbers, false);
+        addSwitch(view, tr("Highlight Current Line"), &EditorSettings::highlightCurrentLine, false);
+        addSwitch(view, tr("Show Whitespace"), &EditorSettings::showWhitespace, false);
+        addSwitch(view, tr("Match Brackets"), &EditorSettings::matchBrackets, true);
 
         Card *session = addCard();
-        addSwitch(session, "Restore Session on Start", &EditorSettings::restoreSession, true);
+        addSwitch(session, tr("Restore Session on Start"), &EditorSettings::restoreSession, true);
 
         m_connection = m_settings.changed.connect([this] { sync(); });
     }
@@ -467,7 +473,7 @@ void PreferencesDialog::show()
         m_dialog->window()->activate();
         return;
     }
-    m_dialog = std::make_unique<DialogWindow>(m_parent, "Settings", 460);
+    m_dialog = std::make_unique<DialogWindow>(m_parent, tr("Settings"), 460);
     m_dialog->setContent<Content>(m_application);
     m_dialog->window()->setBackgroundColor(ColorId::Background);
     m_dialog->show();
@@ -489,40 +495,40 @@ struct ShortcutSection
 static const std::vector<ShortcutSection> &shortcutSections()
 {
     static const std::vector<ShortcutSection> sections{
-        {"Files and Tabs",
-         {{"New tab", "Ctrl+T"},
-          {"New window", "Ctrl+N"},
-          {"Open a file", "Ctrl+O"},
-          {"Save, save as", "Ctrl+S, Ctrl+Shift+S"},
-          {"Save all", "Ctrl+Alt+S"},
-          {"Close the tab, the window", "Ctrl+W, Ctrl+Shift+W"},
-          {"Reopen the closed tab", "Ctrl+Shift+T"},
-          {"Next or previous tab", "Ctrl+PgDown, Ctrl+PgUp"},
-          {"Move the tab", "Ctrl+Shift+PgDown, Ctrl+Shift+PgUp"},
-          {"Go to tab 1 to 9", "Alt+1, Alt+9"},
-          {"Quit", "Ctrl+Q"}}},
-        {"Editing",
-         {{"Undo, redo", "Ctrl+Z, Ctrl+Shift+Z"},
-          {"Cut, copy, paste", "Ctrl+X, Ctrl+C, Ctrl+V"},
-          {"Delete the word before or after", "Ctrl+Backspace, Ctrl+Del"},
-          {"Indent or unindent", "Tab, Shift+Tab"},
-          {"Move the line up or down", "Alt+Up, Alt+Down"},
-          {"Duplicate the line", "Ctrl+Alt+D"},
-          {"Delete the line", "Ctrl+D"},
-          {"Uppercase, lowercase", "Ctrl+U, Ctrl+Shift+U"},
-          {"Overwrite mode", "Ins"}}},
-        {"Find and Move",
-         {{"Find, replace", "Ctrl+F, Ctrl+H"},
-          {"Next or previous match", "F3, Shift+F3"},
-          {"Go to line", "Ctrl+I, Ctrl+L"},
-          {"Word left or right", "Ctrl+Left, Ctrl+Right"},
-          {"Start or end of the document", "Ctrl+Home, Ctrl+End"}}},
-        {"View",
-         {{"Zoom in, out, reset", "Ctrl+=, Ctrl+-, Ctrl+0"},
-          {"Word wrap", "Alt+W"},
-          {"Full screen", "F11"},
-          {"Settings", "Ctrl+,"},
-          {"Keyboard shortcuts", "Ctrl+?"}}},
+        {trNoop("Files and Tabs"),
+         {{trNoop("New tab"), "Ctrl+T"},
+          {trNoop("New window"), "Ctrl+N"},
+          {trNoop("Open a file"), "Ctrl+O"},
+          {trNoop("Save, save as"), "Ctrl+S, Ctrl+Shift+S"},
+          {trNoop("Save all"), "Ctrl+Alt+S"},
+          {trNoop("Close the tab, the window"), "Ctrl+W, Ctrl+Shift+W"},
+          {trNoop("Reopen the closed tab"), "Ctrl+Shift+T"},
+          {trNoop("Next or previous tab"), "Ctrl+PgDown, Ctrl+PgUp"},
+          {trNoop("Move the tab"), "Ctrl+Shift+PgDown, Ctrl+Shift+PgUp"},
+          {trNoop("Go to tab 1 to 9"), "Alt+1, Alt+9"},
+          {trNoop("Quit"), "Ctrl+Q"}}},
+        {trNoop("Editing"),
+         {{trNoop("Undo, redo"), "Ctrl+Z, Ctrl+Shift+Z"},
+          {trNoop("Cut, copy, paste"), "Ctrl+X, Ctrl+C, Ctrl+V"},
+          {trNoop("Delete the word before or after"), "Ctrl+Backspace, Ctrl+Del"},
+          {trNoop("Indent or unindent"), "Tab, Shift+Tab"},
+          {trNoop("Move the line up or down"), "Alt+Up, Alt+Down"},
+          {trNoop("Duplicate the line"), "Ctrl+Alt+D"},
+          {trNoop("Delete the line"), "Ctrl+D"},
+          {trNoop("Uppercase, lowercase"), "Ctrl+U, Ctrl+Shift+U"},
+          {trNoop("Overwrite mode"), "Ins"}}},
+        {trNoop("Find and Move"),
+         {{trNoop("Find, replace"), "Ctrl+F, Ctrl+H"},
+          {trNoop("Next or previous match"), "F3, Shift+F3"},
+          {trNoop("Go to line"), "Ctrl+I, Ctrl+L"},
+          {trNoop("Word left or right"), "Ctrl+Left, Ctrl+Right"},
+          {trNoop("Start or end of the document"), "Ctrl+Home, Ctrl+End"}}},
+        {trNoop("View"),
+         {{trNoop("Zoom in, out, reset"), "Ctrl+=, Ctrl+-, Ctrl+0"},
+          {trNoop("Word wrap"), "Alt+W"},
+          {trNoop("Full screen"), "F11"},
+          {trNoop("Settings"), "Ctrl+,"},
+          {trNoop("Keyboard shortcuts"), "Ctrl+?"}}},
     };
     return sections;
 }
@@ -596,12 +602,12 @@ private:
         List()
         {
             for (const ShortcutSection &section : shortcutSections()) {
-                Label *title = addChild<Label>(section.title);
+                Label *title = addChild<Label>(tr(section.title));
                 title->setColor(ColorId::DisabledText);
                 title->setElide(Label::Elide::Right);
                 Card *card = addChild<Card>();
                 for (size_t i = 0; i < section.rows.size(); ++i) {
-                    InfoRow *row = card->addChild<InfoRow>(section.rows[i].text, section.rows[i].keys,
+                    InfoRow *row = card->addChild<InfoRow>(tr(section.rows[i].text), section.rows[i].keys,
                                                            i + 1 == section.rows.size());
                     card->addRow(row);
                 }
@@ -664,7 +670,7 @@ void ShortcutsDialog::show()
         m_dialog->window()->activate();
         return;
     }
-    m_dialog = std::make_unique<DialogWindow>(m_parent, "Keyboard Shortcuts", 480);
+    m_dialog = std::make_unique<DialogWindow>(m_parent, tr("Keyboard Shortcuts"), 480);
     m_dialog->setContent<Content>();
     m_dialog->window()->setBackgroundColor(ColorId::Background);
     DialogWindow *dialog = m_dialog.get();
@@ -680,8 +686,8 @@ public:
     Content()
         : m_header(addChild<WindowHeader>(40))
         , m_icon(addChild<ThemeIcon>("accessories-text-editor", 64))
-        , m_name(addChild<Label>("Text Editor"))
-        , m_description(addChild<Label>("A simple editor for plain text"))
+        , m_name(addChild<Label>(tr("Text Editor")))
+        , m_description(addChild<Label>(tr("A simple editor for plain text")))
         , m_link(addChild<Label>())
     {
         m_header->setMinimizeVisible(false);
@@ -746,7 +752,7 @@ void AboutDialog::show()
         return;
     }
     m_window = std::make_unique<Window>();
-    m_window->setTitle("Text Editor");
+    m_window->setTitle(tr("Text Editor"));
     m_window->setTransientParent(m_parent, true);
     auto content = std::make_unique<Content>();
     const double height = content->heightForWidth(300);

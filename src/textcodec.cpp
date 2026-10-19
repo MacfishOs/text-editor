@@ -4,6 +4,7 @@
 #include "textcodec.h"
 #include "unicode.h"
 
+#include "base/i18n.h"
 #include "base/locale.h"
 #include "base/strings.h"
 
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+
+using cutefish::i18n::trNoop;
 
 // Enough bytes to judge a legacy encoding by; whole files can be large.
 static constexpr size_t sampleSize = 256 * 1024;
@@ -580,30 +583,31 @@ std::string TextCodec::encode(const std::vector<std::string> &lines, const std::
 const std::vector<EncodingInfo> &TextCodec::encodings()
 {
     static const std::vector<EncodingInfo> list{
-        {"UTF-8", "Unicode (UTF-8)"},
-        {"UTF-16LE", "Unicode (UTF-16 LE)"},
-        {"UTF-16BE", "Unicode (UTF-16 BE)"},
-        {"GB18030", "Chinese Simplified (GB18030)"},
-        {"Big5", "Chinese Traditional (Big5)"},
-        {"Big5-HKSCS", "Chinese Traditional (Big5-HKSCS)"},
-        {"Shift_JIS", "Japanese (Shift_JIS)"},
-        {"EUC-JP", "Japanese (EUC-JP)"},
-        {"EUC-KR", "Korean (EUC-KR)"},
-        {"windows-1252", "Western (Windows-1252)"},
-        {"ISO-8859-1", "Western (ISO-8859-1)"},
-        {"ISO-8859-15", "Western (ISO-8859-15)"},
-        {"windows-1250", "Central European (Windows-1250)"},
-        {"ISO-8859-2", "Central European (ISO-8859-2)"},
-        {"windows-1251", "Cyrillic (Windows-1251)"},
-        {"KOI8-R", "Cyrillic (KOI8-R)"},
-        {"KOI8-U", "Cyrillic (KOI8-U)"},
-        {"windows-1253", "Greek (Windows-1253)"},
-        {"windows-1254", "Turkish (Windows-1254)"},
-        {"windows-1255", "Hebrew (Windows-1255)"},
-        {"windows-1256", "Arabic (Windows-1256)"},
-        {"windows-1257", "Baltic (Windows-1257)"},
-        {"windows-1258", "Vietnamese (Windows-1258)"},
-        {"windows-874", "Thai (Windows-874)"},
+        // TRANSLATORS: an encoding menu entry; the codec name in parentheses stays as it is.
+        {"UTF-8", trNoop("Unicode (UTF-8)")},
+        {"UTF-16LE", trNoop("Unicode (UTF-16 LE)")},
+        {"UTF-16BE", trNoop("Unicode (UTF-16 BE)")},
+        {"GB18030", trNoop("Chinese Simplified (GB18030)")},
+        {"Big5", trNoop("Chinese Traditional (Big5)")},
+        {"Big5-HKSCS", trNoop("Chinese Traditional (Big5-HKSCS)")},
+        {"Shift_JIS", trNoop("Japanese (Shift_JIS)")},
+        {"EUC-JP", trNoop("Japanese (EUC-JP)")},
+        {"EUC-KR", trNoop("Korean (EUC-KR)")},
+        {"windows-1252", trNoop("Western (Windows-1252)")},
+        {"ISO-8859-1", trNoop("Western (ISO-8859-1)")},
+        {"ISO-8859-15", trNoop("Western (ISO-8859-15)")},
+        {"windows-1250", trNoop("Central European (Windows-1250)")},
+        {"ISO-8859-2", trNoop("Central European (ISO-8859-2)")},
+        {"windows-1251", trNoop("Cyrillic (Windows-1251)")},
+        {"KOI8-R", trNoop("Cyrillic (KOI8-R)")},
+        {"KOI8-U", trNoop("Cyrillic (KOI8-U)")},
+        {"windows-1253", trNoop("Greek (Windows-1253)")},
+        {"windows-1254", trNoop("Turkish (Windows-1254)")},
+        {"windows-1255", trNoop("Hebrew (Windows-1255)")},
+        {"windows-1256", trNoop("Arabic (Windows-1256)")},
+        {"windows-1257", trNoop("Baltic (Windows-1257)")},
+        {"windows-1258", trNoop("Vietnamese (Windows-1258)")},
+        {"windows-874", trNoop("Thai (Windows-874)")},
     };
     return list;
 }

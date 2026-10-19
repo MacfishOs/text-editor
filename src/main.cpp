@@ -6,6 +6,7 @@
 
 #include "base/dbus.h"
 #include "base/event_loop.h"
+#include "base/i18n.h"
 #include "ui/application.h"
 
 #include <clocale>
@@ -102,6 +103,7 @@ int main(int argc, char **argv)
 #else
     app.setApplicationId("cutefish-text-editor");
 #endif
+    cutefish::i18n::setDomain("cutefish-text-editor");
     std::setlocale(LC_ALL, "");
 
     std::error_code error;

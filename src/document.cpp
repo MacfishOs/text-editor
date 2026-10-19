@@ -9,6 +9,7 @@
 #include "base/elapsed_timer.h"
 #include "base/event_loop.h"
 #include "base/file.h"
+#include "base/i18n.h"
 #include "base/paths.h"
 #include "base/strings.h"
 #include "base/uuid.h"
@@ -24,6 +25,8 @@
 #include <unistd.h>
 
 using namespace std::chrono_literals;
+using cutefish::i18n::format;
+using cutefish::i18n::tr;
 namespace fs = std::filesystem;
 namespace strings = cutefish::base::strings;
 
@@ -93,12 +96,12 @@ static LoadResult readFile(const std::string &path, const std::string &encoding,
     const auto info = statOf(path);
     if (!info) {
         result.error = Document::LoadFailed;
-        result.errorString = "The file does not exist.";
+        result.errorString = tr("The file does not exist.");
         return result;
     }
     if (S_ISDIR(info->st_mode)) {
         result.error = Document::LoadFailed;
-        result.errorString = "This is a folder.";
+        result.errorString = tr("This is a folder.");
         return result;
     }
     if (info->st_size > Document::maximumFileSize) {
@@ -309,7 +312,7 @@ std::string Document::title() const
     const std::string &line = m_buffer.line(0);
     const std::string first = strings::simplified(std::string_view(line).substr(0, utf16Prefix(line, 200)));
     if (first.empty())
-        return "Untitled";
+        return tr("Untitled");
     if (Unicode::utf16Length(first) > 40)
         return first.substr(0, utf16Prefix(first, 39)) + "…";
     return first;
@@ -1692,7 +1695,7 @@ static bool writeFile(const std::string &target, std::string_view bytes, std::st
     if (fileExists && existing.st_uid != ::geteuid())
         return writeInPlace(target, bytes, error);
     if (fileExists && ::access(target.c_str(), W_OK) != 0) {
-        *error = "Existing file " + target + " is not writable";
+        *error = format(tr("Existing file {path} is not writable"), {{"path", target}});
         return false;
     }
 

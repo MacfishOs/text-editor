@@ -5,6 +5,7 @@
 #include "regexp.h"
 #include "unicode.h"
 
+#include "base/i18n.h"
 #include "base/locale.h"
 #include "base/mime_database.h"
 #include "base/strings.h"
@@ -15,6 +16,7 @@
 #include <unordered_set>
 #include <utility>
 
+using cutefish::i18n::tr;
 namespace strings = cutefish::base::strings;
 
 struct WordHash
@@ -468,7 +470,7 @@ std::string Syntax::id(const Language *language)
 std::string Syntax::name(std::string_view id)
 {
     const Language *l = language(id);
-    return l ? l->name : "Plain Text";
+    return l ? l->name : tr("Plain Text");
 }
 
 // Without trailing version digits: "python3.11" is "python".

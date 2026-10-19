@@ -9,6 +9,7 @@
 #include "pagebars.h"
 
 #include "base/event_loop.h"
+#include "base/i18n.h"
 #include "ui/dialog_window.h"
 #include "ui/menu.h"
 #include "ui/painter.h"
@@ -19,6 +20,8 @@
 
 using namespace cutefish::ui;
 using namespace std::chrono_literals;
+using cutefish::i18n::format;
+using cutefish::i18n::tr;
 
 // From the editor's edges, as the other margins of the window.
 static constexpr double cardInset = 12;
@@ -336,10 +339,12 @@ void EditorPage::confirmReload(const std::string &encoding)
         return;
     m_reloadEncoding = encoding;
     m_reloadConfirm = std::make_unique<ConfirmDialog>(&m_window->window(),
-                                                      encoding.empty() ? "Revert \xE2\x80\x9C" + title() + "\xE2\x80\x9D?"
-                                                                       : "Reopen with " + EditorApplication::encodingLabel(encoding) + "?",
-                                                      "Your unsaved changes will be lost.");
-    m_reloadConfirm->setConfirmText(encoding.empty() ? "Revert" : "Reopen");
+                                                      encoding.empty() ? format(tr("Revert \xE2\x80\x9C{name}\xE2\x80\x9D?"),
+                                                                                {{"name", title()}})
+                                                                       : format(tr("Reopen with {encoding}?"),
+                                                                                {{"encoding", EditorApplication::encodingLabel(encoding)}}),
+                                                      tr("Your unsaved changes will be lost."));
+    m_reloadConfirm->setConfirmText(encoding.empty() ? tr("Revert") : tr("Reopen"));
     m_reloadConfirm->setDestructive(true);
     m_reloadConfirm->onAccepted = [this] {
         if (!m_reloadEncoding.empty())
@@ -355,17 +360,17 @@ void EditorPage::popupContextMenu(PointF position)
     Document &document = *m_document;
     m_contextMenu = std::make_unique<Menu>();
     Menu &menu = *m_contextMenu;
-    menu.setItemEnabled(menu.addItem("Undo", [&document] { document.undo(); }, "Ctrl+Z"), document.canUndo());
-    menu.setItemEnabled(menu.addItem("Redo", [&document] { document.redo(); }, "Ctrl+Shift+Z"), document.canRedo());
+    menu.setItemEnabled(menu.addItem(tr("Undo"), [&document] { document.undo(); }, "Ctrl+Z"), document.canUndo());
+    menu.setItemEnabled(menu.addItem(tr("Redo"), [&document] { document.redo(); }, "Ctrl+Shift+Z"), document.canRedo());
     menu.addSeparator();
-    menu.setItemEnabled(menu.addItem("Cut", [this] { m_editor->cut(); }, "Ctrl+X"),
+    menu.setItemEnabled(menu.addItem(tr("Cut"), [this] { m_editor->cut(); }, "Ctrl+X"),
                         document.hasSelection() && !document.isLocked());
-    menu.setItemEnabled(menu.addItem("Copy", [this] { m_editor->copy(); }, "Ctrl+C"), document.hasSelection());
-    menu.setItemEnabled(menu.addItem("Paste", [this] { m_editor->paste(); }, "Ctrl+V"), !document.isLocked());
-    menu.setItemEnabled(menu.addItem("Delete", [&document] { document.deleteSelection(); }, "Del"),
+    menu.setItemEnabled(menu.addItem(tr("Copy"), [this] { m_editor->copy(); }, "Ctrl+C"), document.hasSelection());
+    menu.setItemEnabled(menu.addItem(tr("Paste"), [this] { m_editor->paste(); }, "Ctrl+V"), !document.isLocked());
+    menu.setItemEnabled(menu.addItem(tr("Delete"), [&document] { document.deleteSelection(); }, "Del"),
                         document.hasSelection() && !document.isLocked());
     menu.addSeparator();
-    menu.addItem("Select All", [&document] { document.selectAll(); }, "Ctrl+A");
+    menu.addItem(tr("Select All"), [&document] { document.selectAll(); }, "Ctrl+A");
     if (Window *window = this->window())
         menu.popup(window, position);
 }

@@ -10,6 +10,7 @@
 #include "regexp.h"
 #include "textcodec.h"
 
+#include "base/i18n.h"
 #include "base/strings.h"
 #include "ui/keys.h"
 #include "ui/label.h"
@@ -24,6 +25,10 @@
 
 using namespace cutefish::ui;
 using namespace std::chrono_literals;
+using cutefish::i18n::format;
+using cutefish::i18n::tr;
+using cutefish::i18n::trn;
+using cutefish::i18n::trNoop;
 namespace strings = cutefish::base::strings;
 
 static const char *const lineEndingShortNames[] = {"LF", "CRLF", "CR"};
@@ -90,10 +95,13 @@ RoundButton *StatusBar::addItem(const std::string &name)
 void StatusBar::update()
 {
     const Document &document = m_page.document();
-    std::string position = "Ln " + std::to_string(document.cursorLine() + 1) + ", Col "
-            + std::to_string(document.visualColumn());
+    // TRANSLATORS: the cursor position in the status bar; "Ln" and "Col" abbreviate line and column.
+    std::string position = format(tr("Ln {line}, Col {column}"), {{"line", std::to_string(document.cursorLine() + 1)},
+                                                                  {"column", std::to_string(document.visualColumn())}});
     if (document.hasSelection())
-        position += "  (" + std::to_string(document.selectionLength()) + " selected)";
+        // TRANSLATORS: {position} is the cursor position, such as "Ln 3, Col 7".
+        position = format(trn("{position}  ({n} selected)", "{position}  ({n} selected)", uint64_t(document.selectionLength())),
+                          {{"position", position}});
     m_position->label()->setText(position);
 
     const EditorWindow *window = m_page.editorWindow();
@@ -101,11 +109,13 @@ void StatusBar::update()
     m_zoom->setVisible(window && zoom != 1);
     m_zoom->label()->setText(std::to_string(int(std::lround(zoom * 100))) + "%");
     m_overwrite->setVisible(m_page.editor().overwriteMode());
-    m_overwrite->label()->setText("OVR");
+    // TRANSLATORS: a short status bar badge shown while typing overwrites the text after the cursor.
+    m_overwrite->label()->setText(tr("OVR"));
     m_readOnly->setVisible(document.isLocked());
-    m_readOnly->label()->setText("Read-Only");
-    m_indentation->label()->setText(document.insertSpaces() ? "Spaces: " + std::to_string(document.indentWidth())
-                                                            : "Tab Width: " + std::to_string(document.tabWidth()));
+    m_readOnly->label()->setText(tr("Read-Only"));
+    m_indentation->label()->setText(document.insertSpaces()
+                                            ? format(tr("Spaces: {width}"), {{"width", std::to_string(document.indentWidth())}})
+                                            : format(tr("Tab Width: {width}"), {{"width", std::to_string(document.tabWidth())}}));
     m_language->label()->setText(document.languageName());
     m_lineEnding->label()->setText(lineEndingShortNames[document.lineEnding()]);
     m_encoding->label()->setText(document.encoding() + (document.hasBom() ? " BOM" : ""));
@@ -146,13 +156,13 @@ void StatusBar::openIndentMenu(PointF position)
 {
     Document &document = m_page.document();
     m_menu = std::make_unique<Menu>();
-    const size_t spaces = m_menu->addItem("Indent with Spaces", [&document] { document.setInsertSpaces(true); });
+    const size_t spaces = m_menu->addItem(tr("Indent with Spaces"), [&document] { document.setInsertSpaces(true); });
     m_menu->setItemChecked(spaces, document.insertSpaces());
-    const size_t tabs = m_menu->addItem("Indent with Tabs", [&document] { document.setInsertSpaces(false); });
+    const size_t tabs = m_menu->addItem(tr("Indent with Tabs"), [&document] { document.setInsertSpaces(false); });
     m_menu->setItemChecked(tabs, !document.insertSpaces());
     m_menu->addSeparator();
     for (const int width : {2, 3, 4, 8}) {
-        const size_t item = m_menu->addItem("Width: " + std::to_string(width), [&document, width] {
+        const size_t item = m_menu->addItem(format(tr("Width: {width}"), {{"width", std::to_string(width)}}), [&document, width] {
             document.setIndentWidth(width);
             document.setTabWidth(width);
         });
@@ -178,10 +188,10 @@ void StatusBar::openLanguageMenu(PointF position)
 void StatusBar::openLineEndingMenu(PointF position)
 {
     Document &document = m_page.document();
-    static const char *const names[] = {"Unix (LF)", "Windows (CRLF)", "Classic Mac (CR)"};
+    static const char *const names[] = {trNoop("Unix (LF)"), trNoop("Windows (CRLF)"), trNoop("Classic Mac (CR)")};
     m_menu = std::make_unique<Menu>();
     for (int i = 0; i < 3; ++i) {
-        const size_t item = m_menu->addItem(names[i], [&document, i] { document.setLineEnding(i); });
+        const size_t item = m_menu->addItem(tr(names[i]), [&document, i] { document.setLineEnding(i); });
         m_menu->setItemChecked(item, document.lineEnding() == i);
     }
     m_menu->popup(window(), position);
@@ -191,18 +201,18 @@ void StatusBar::openEncodingMenu(PointF position)
 {
     Document &document = m_page.document();
     m_menu = std::make_unique<Menu>();
-    Menu *reopenMenu = m_menu->addSubmenu("Reopen with Encoding");
+    Menu *reopenMenu = m_menu->addSubmenu(tr("Reopen with Encoding"));
     m_menu->setItemEnabled(0, !document.isUntitled());
-    Menu *saveMenu = m_menu->addSubmenu("Save with Encoding");
+    Menu *saveMenu = m_menu->addSubmenu(tr("Save with Encoding"));
     for (const EncodingInfo &info : TextCodec::encodings()) {
         const std::string name = info.name;
-        const size_t reopenItem = reopenMenu->addItem(info.label, [this, name] { m_page.setEncodingForReload(name); });
+        const size_t reopenItem = reopenMenu->addItem(tr(info.label), [this, name] { m_page.setEncodingForReload(name); });
         reopenMenu->setItemChecked(reopenItem, document.encoding() == name);
-        const size_t saveItem = saveMenu->addItem(info.label, [&document, name] { document.setEncoding(name); });
+        const size_t saveItem = saveMenu->addItem(tr(info.label), [&document, name] { document.setEncoding(name); });
         saveMenu->setItemChecked(saveItem, document.encoding() == name);
     }
     m_menu->addSeparator();
-    const size_t bom = m_menu->addItem("Byte Order Mark", [&document] { document.setBom(!document.hasBom()); });
+    const size_t bom = m_menu->addItem(tr("Byte Order Mark"), [&document] { document.setBom(!document.hasBom()); });
     m_menu->setItemEnabled(bom, strings::startsWith(document.encoding(), "UTF-"));
     m_menu->setItemChecked(bom, document.hasBom());
     m_menu->popup(window(), position);
@@ -228,7 +238,9 @@ void InfoBar::update()
     EditorPage &page = m_page;
     m_notice = document.notice();
     const std::string &detail = document.noticeDetail();
-    const auto withDetail = [&detail](const std::string &text) { return detail.empty() ? text : text + " " + detail; };
+    const auto withDetail = [&detail](const char *text, const char *pattern) {
+        return detail.empty() ? std::string(text) : format(pattern, {{"error", detail}});
+    };
 
     std::vector<std::pair<std::string, std::function<void()>>> actions;
     const auto closeTab = [&page](bool ask) {
@@ -243,73 +255,74 @@ void InfoBar::update()
     };
     switch (m_notice) {
     case Document::Restored:
-        m_message = "Unsaved changes from your last session were restored.";
+        m_message = tr("Unsaved changes from your last session were restored.");
         if (!document.isUntitled())
-            actions.push_back({"Discard Changes", [&page] { page.revert(); }});
-        actions.push_back({"OK", [&document] { document.dismissNotice(); }});
+            actions.push_back({tr("Discard Changes"), [&page] { page.revert(); }});
+        actions.push_back({tr("OK"), [&document] { document.dismissNotice(); }});
         break;
     case Document::ChangedOnDisk:
-        m_message = "The file has changed on disk. Saving now would overwrite that change.";
-        actions = {{"Keep My Version", [&document] { document.keepLocalVersion(); }},
-                   {"Reload", [&document] { document.reload(); }}};
+        m_message = tr("The file has changed on disk. Saving now would overwrite that change.");
+        actions = {{tr("Keep My Version"), [&document] { document.keepLocalVersion(); }},
+                   {tr("Reload"), [&document] { document.reload(); }}};
         break;
     case Document::Deleted:
-        m_message = "The file was deleted or moved. Your text is still here.";
-        actions = {{"Close", closeTab(true)}, {"Save", [&page] {
-                                                   if (EditorWindow *window = page.editorWindow())
-                                                       window->savePage(&page);
-                                               }}};
+        m_message = tr("The file was deleted or moved. Your text is still here.");
+        actions = {{tr("Close"), closeTab(true)}, {tr("Save"), [&page] {
+                                                       if (EditorWindow *window = page.editorWindow())
+                                                           window->savePage(&page);
+                                                   }}};
         break;
     case Document::Malformed:
-        m_message = "Some characters could not be read as " + EditorApplication::encodingLabel(document.encoding())
-                + " and show as \xEF\xBF\xBD.";
-        actions = {{"Dismiss", [&document] { document.dismissNotice(); }},
-                   {"Choose Encoding\xE2\x80\xA6", [&page] { page.showEncodingMenu(); }}};
+        m_message = format(tr("Some characters could not be read as {encoding} and show as \xEF\xBF\xBD."),
+                           {{"encoding", EditorApplication::encodingLabel(document.encoding())}});
+        actions = {{tr("Dismiss"), [&document] { document.dismissNotice(); }},
+                   {tr("Choose Encoding\xE2\x80\xA6"), [&page] { page.showEncodingMenu(); }}};
         break;
     case Document::Binary:
-        m_message = "This file does not look like text. Editing it could damage it.";
-        actions = {{"Close", closeTab(false)}, {"Edit Anyway", [&document] { document.setLocked(false); }}};
+        m_message = tr("This file does not look like text. Editing it could damage it.");
+        actions = {{tr("Close"), closeTab(false)}, {tr("Edit Anyway"), [&document] { document.setLocked(false); }}};
         break;
     case Document::ReadOnly:
-        m_message = "You do not have permission to save this file.";
-        actions = {{"Dismiss", [&document] { document.dismissNotice(); }}, {"Save As\xE2\x80\xA6", saveAs}};
+        m_message = tr("You do not have permission to save this file.");
+        actions = {{tr("Dismiss"), [&document] { document.dismissNotice(); }}, {tr("Save As\xE2\x80\xA6"), saveAs}};
         break;
     case Document::PermissionDenied:
-        m_message = "You do not have permission to open this file.";
-        actions = {{"Close", closeTab(false)}, {"Retry", [&document] { document.reload(); }}};
+        m_message = tr("You do not have permission to open this file.");
+        actions = {{tr("Close"), closeTab(false)}, {tr("Retry"), [&document] { document.reload(); }}};
         break;
     case Document::LoadFailed:
-        m_message = withDetail("The file could not be opened.");
-        actions = {{"Close", closeTab(false)}, {"Retry", [&document] { document.reload(); }}};
+        m_message = withDetail(tr("The file could not be opened."), tr("The file could not be opened. {error}"));
+        actions = {{tr("Close"), closeTab(false)}, {tr("Retry"), [&document] { document.reload(); }}};
         break;
     case Document::TooLarge:
-        m_message = "The file is too large to open (more than 256 MB).";
-        actions = {{"Close", closeTab(false)}};
+        m_message = tr("The file is too large to open (more than 256 MB).");
+        actions = {{tr("Close"), closeTab(false)}};
         break;
     case Document::SaveFailed:
-        m_message = withDetail("The file could not be saved.");
-        actions = {{"Dismiss", [&document] { document.dismissNotice(); }}, {"Save As\xE2\x80\xA6", saveAs}};
+        m_message = withDetail(tr("The file could not be saved."), tr("The file could not be saved. {error}"));
+        actions = {{tr("Dismiss"), [&document] { document.dismissNotice(); }}, {tr("Save As\xE2\x80\xA6"), saveAs}};
         break;
     case Document::LossyEncoding:
-        m_message = "Some characters cannot be saved as " + EditorApplication::encodingLabel(detail) + ". Nothing was saved.";
-        actions = {{"Choose Encoding\xE2\x80\xA6", [&page] { page.showEncodingMenu(); }},
-                   {"Save as UTF-8", [&document] { document.saveAsUtf8(); }}};
+        m_message = format(tr("Some characters cannot be saved as {encoding}. Nothing was saved."),
+                           {{"encoding", EditorApplication::encodingLabel(detail)}});
+        actions = {{tr("Choose Encoding\xE2\x80\xA6"), [&page] { page.showEncodingMenu(); }},
+                   {tr("Save as UTF-8"), [&document] { document.saveAsUtf8(); }}};
         break;
     case Document::LargeFile:
-        m_message = "Syntax highlighting is off for this large file.";
-        actions = {{"Dismiss", [&document] { document.dismissNotice(); }},
-                   {"Highlight Anyway", [&document] { document.setLanguage(document.language()); }}};
+        m_message = tr("Syntax highlighting is off for this large file.");
+        actions = {{tr("Dismiss"), [&document] { document.dismissNotice(); }},
+                   {tr("Highlight Anyway"), [&document] { document.setLanguage(document.language()); }}};
         break;
     case Document::MalformedSave:
-        m_message = "Saving would replace the characters that could not be read as "
-                + EditorApplication::encodingLabel(detail) + ".";
-        actions = {{"Choose Encoding\xE2\x80\xA6", [&page] { page.showEncodingMenu(); }},
-                   {"Save Anyway", [&document] { document.saveReplacingMalformed(); }}};
+        m_message = format(tr("Saving would replace the characters that could not be read as {encoding}."),
+                           {{"encoding", EditorApplication::encodingLabel(detail)}});
+        actions = {{tr("Choose Encoding\xE2\x80\xA6"), [&page] { page.showEncodingMenu(); }},
+                   {tr("Save Anyway"), [&document] { document.saveReplacingMalformed(); }}};
         break;
     case Document::MixedLineEndings:
-        m_message = std::string("This file mixes line endings. Saving will use ")
-                + lineEndingShortNames[document.lineEnding()] + " throughout.";
-        actions = {{"OK", [&document] { document.dismissNotice(); }}};
+        m_message = format(tr("This file mixes line endings. Saving will use {ending} throughout."),
+                           {{"ending", lineEndingShortNames[document.lineEnding()]}});
+        actions = {{tr("OK"), [&document] { document.dismissNotice(); }}};
         break;
     default:
         m_message.clear();
@@ -413,34 +426,34 @@ FindBar::FindBar(EditorPage &page)
     };
 
     m_field->setName("findField");
-    m_field->setPlaceholder("Find");
+    m_field->setPlaceholder(tr("Find"));
     m_field->onTextEdited = [this] { update(); };
     m_field->onReturn = [this](bool shift) { find(shift); };
     m_field->onEscape = [this] { close(); };
 
     m_count->setFontSize(12);
-    m_caseToggle = addToggle("Aa", "Match Case");
+    m_caseToggle = addToggle("Aa", tr("Match Case"));
     m_caseToggle->onClicked = [this] {
         EditorSettings &settings = m_page.application().settings();
         settings.findCaseSensitive = !settings.findCaseSensitive;
         settings.commit();
         update();
     };
-    m_wordsToggle = addToggle("W", "Whole Words");
+    m_wordsToggle = addToggle("W", tr("Whole Words"));
     m_wordsToggle->onClicked = [this] {
         EditorSettings &settings = m_page.application().settings();
         settings.findWholeWords = !settings.findWholeWords;
         settings.commit();
         update();
     };
-    m_regexToggle = addToggle(".*", "Regular Expression");
+    m_regexToggle = addToggle(".*", tr("Regular Expression"));
     m_regexToggle->onClicked = [this] {
         EditorSettings &settings = m_page.application().settings();
         settings.findRegex = !settings.findRegex;
         settings.commit();
         update();
     };
-    m_selectionToggle = addToggle("[ ]", "In Selection");
+    m_selectionToggle = addToggle("[ ]", tr("In Selection"));
     m_selectionToggle->onClicked = [this] {
         m_inSelection = !m_inSelection;
         update();
@@ -460,18 +473,18 @@ FindBar::FindBar(EditorPage &page)
 
     m_replaceField = addChild<CardField>();
     m_replaceField->setName("replaceField");
-    m_replaceField->setPlaceholder("Replace with");
+    m_replaceField->setPlaceholder(tr("Replace with"));
     m_replaceField->onReturn = [this](bool) { m_page.document().replaceCurrent(m_replaceField->text()); };
     m_replaceField->onEscape = [this] { close(); };
-    m_replace = addChild<TextButton>("Replace");
+    m_replace = addChild<TextButton>(tr("Replace"));
     m_replace->setName("replaceButton");
     m_replace->onClicked = [this] { m_page.document().replaceCurrent(m_replaceField->text()); };
-    m_replaceAll = addChild<TextButton>("Replace All");
+    m_replaceAll = addChild<TextButton>(tr("Replace All"));
     m_replaceAll->setName("replaceAllButton");
     m_replaceAll->onClicked = [this] {
         const int count = m_page.document().replaceAll(m_replaceField->text());
         if (EditorWindow *window = m_page.editorWindow())
-            window->showNotification("Replaced " + std::to_string(count) + " occurrence(s)", 2000);
+            window->showNotification(trn("Replaced {n} occurrence", "Replaced {n} occurrences", uint64_t(count)), 2000);
     };
 
     m_wrapped.setSingleShot(true);
@@ -571,16 +584,19 @@ void FindBar::refresh()
     std::string count;
     if (hasText) {
         if (invalid)
-            count = "Invalid";
+            // TRANSLATORS: beside the find field, when the search is not a valid regular expression.
+            count = tr("Invalid");
         else if (m_wrapped.isActive())
-            count = "Wrapped";
+            // TRANSLATORS: beside the find field, when the search has continued from the other end of the document.
+            count = tr("Wrapped");
         else if (document.matchCount() == 0)
-            count = "No matches";
+            count = tr("No matches");
         else if (document.matchIndex() > 0)
-            count = std::to_string(document.matchIndex()) + " of " + std::to_string(document.matchCount());
+            // TRANSLATORS: the current match and the number of matches, such as "2 of 5".
+            count = format(tr("{index} of {count}"), {{"index", std::to_string(document.matchIndex())},
+                                                      {"count", std::to_string(document.matchCount())}});
         else
-            // qsTr's %n without a translation: the plural stays as written.
-            count = std::to_string(document.matchCount()) + " match(es)";
+            count = trn("{n} match", "{n} matches", uint64_t(document.matchCount()));
     }
     m_count->setText(count);
     m_count->setVisible(!count.empty());
@@ -711,7 +727,9 @@ bool GoToLineBar::valid() const
 
 void GoToLineBar::refresh()
 {
-    m_field->setPlaceholder("Go to line (1\xE2\x80\x93" + std::to_string(m_page.document().lineCount()) + "), :column");
+    // TRANSLATORS: {count} is the number of lines; a column number can follow the line number after a colon.
+    m_field->setPlaceholder(format(tr("Go to line (1\xE2\x80\x93{count}), :column"),
+                                   {{"count", std::to_string(m_page.document().lineCount())}}));
     m_field->setTextColor(!m_field->text().empty() && !valid() ? std::optional<Color>(accent::red) : std::nullopt);
 }
 
@@ -755,7 +773,7 @@ LoadingView::LoadingView(EditorPage &page)
     : m_page(page)
     , m_label(addChild<Label>())
     , m_progress(addChild<ProgressBar>())
-    , m_cancel(addChild<TextButton>("Cancel"))
+    , m_cancel(addChild<TextButton>(tr("Cancel")))
 {
     m_label->setElide(Label::Elide::Middle);
     m_cancel->onClicked = [this] {
@@ -767,7 +785,7 @@ LoadingView::LoadingView(EditorPage &page)
 
 void LoadingView::update()
 {
-    m_label->setText("Opening \xE2\x80\x9C" + m_page.document().fileName() + "\xE2\x80\x9D\xE2\x80\xA6");
+    m_label->setText(format(tr("Opening \xE2\x80\x9C{name}\xE2\x80\x9D\xE2\x80\xA6"), {{"name", m_page.document().fileName()}}));
     m_progress->setValue(m_page.document().loadProgress());
     requestLayout();
 }

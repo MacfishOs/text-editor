@@ -55,7 +55,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE editor-ui)
 
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-install(FILES cutefish-text-editor.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+cutefish_add_translations(cutefish-text-editor SOURCES src DESKTOP_FILES cutefish-text-editor.desktop)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/cutefish-text-editor.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

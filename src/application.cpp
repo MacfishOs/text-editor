@@ -9,6 +9,7 @@
 
 #include "base/dbus.h"
 #include "base/event_loop.h"
+#include "base/i18n.h"
 #include "base/strings.h"
 #include "base/url.h"
 #include "ui/application.h"
@@ -19,6 +20,7 @@
 #include <filesystem>
 
 using namespace std::chrono_literals;
+using cutefish::i18n::tr;
 namespace fs = std::filesystem;
 namespace strings = cutefish::base::strings;
 namespace dbus = cutefish::base::dbus;
@@ -75,7 +77,7 @@ std::string EditorApplication::encodingLabel(const std::string &encoding)
 {
     for (const EncodingInfo &info : TextCodec::encodings()) {
         if (encoding == info.name)
-            return info.label;
+            return tr(info.label);
     }
     return encoding;
 }
