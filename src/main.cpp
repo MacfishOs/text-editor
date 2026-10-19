@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 #ifndef TEXT_EDITOR_VERSION
-#define TEXT_EDITOR_VERSION "1.0.0"
+#define TEXT_EDITOR_VERSION "1.0"
 #endif
 
 namespace dbus = cutefish::base::dbus;
