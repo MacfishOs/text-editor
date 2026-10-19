@@ -13,6 +13,7 @@
 #include "base/i18n.h"
 #include "base/strings.h"
 #include "base/url.h"
+#include "ui/application.h"
 #include "ui/drag.h"
 #include "ui/dialog_window.h"
 #include "ui/file_chooser.h"
@@ -335,6 +336,7 @@ EditorWindow::EditorWindow(EditorApplication &application, Options options)
             page->document().checkDisk();
     };
     m_connections.push_back(m_application.settings().changed.connect([this] { applySettings(); }));
+    m_languageChanged = Application::instance()->languageChanged.connect([this] { retranslate(); });
     addShortcuts();
 
     if (options.detachedPage) {
@@ -357,6 +359,37 @@ EditorWindow::~EditorWindow()
 {
     m_pageConnections.clear();
     m_connections.clear();
+}
+
+void EditorWindow::retranslate()
+{
+    if (m_mainMenu)
+        m_mainMenu->close();
+    m_mainMenu.reset();
+    if (m_tabMenu)
+        m_tabMenu->close();
+    m_tabMenu.reset();
+    for (EditorPage *page : m_pages)
+        page->retranslate();
+    m_header->updateLabels();
+    updateTitle();
+
+    if (m_statistics && m_statistics->window())
+        showStatistics();
+    if (m_preferences && m_preferences->window()) {
+        m_preferences.reset();
+        showPreferences();
+    }
+    if (m_shortcuts && m_shortcuts->window()) {
+        m_shortcuts.reset();
+        showShortcuts();
+    }
+    if (m_about && m_about->window()) {
+        m_about.reset();
+        showAbout();
+    }
+    if (m_saveDialog)
+        m_saveDialog->retranslate();
 }
 
 void EditorWindow::zoomBy(int step)

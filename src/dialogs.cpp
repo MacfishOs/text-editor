@@ -84,7 +84,7 @@ public:
             for (EditorPage *page : pages) {
                 const std::string folder = page->document().folder();
                 CheckBox *box = boxes->addChild<CheckBox>(page->title() + (folder.empty() ? "" : "  \xE2\x80\x94  " + folder));
-                box->setChecked(true);
+                box->setChecked(std::find(dialog.m_checked.begin(), dialog.m_checked.end(), page) != dialog.m_checked.end());
                 box->onToggled = [&dialog, page](bool checked) {
                     std::erase(dialog.m_checked, page);
                     if (checked)
@@ -111,6 +111,7 @@ public:
         };
         m_save = actions->addChild<DialogButton>(tr("Save"), true);
         m_save->onClicked = [&dialog] { dialog.saveChecked(); };
+        m_save->setEnabled(!dialog.m_checked.empty());
 
         m_header->setButtonMargin(8);
         m_header->setMinimizeVisible(false);
@@ -150,18 +151,12 @@ void SaveChangesDialog::ask(const std::vector<EditorPage *> &pages, std::functio
         m_lifetimes.push_back(page->lifetime());
     m_checked = pages;
     m_action = std::move(then);
-    const std::string title = pages.size() == 1
-            ? format(tr("Save changes to \xE2\x80\x9C{name}\xE2\x80\x9D?"), {{"name", pages.front()->title()}})
-            : trn("Save changes to {n} document?", "Save changes to {n} documents?", pages.size());
 
     m_window = std::make_unique<Window>();
     m_window->setBackgroundColor(ColorId::SecondBackground);
     m_window->setTransientParent(m_parent, true);
-    m_window->setTitle(title);
     m_window->onCloseRequested = [this] { finish(false); };
-    auto content = std::make_unique<Content>(*this, title, pages);
-    DialogButton *save = content->saveButton();
-    m_window->setContentView(std::move(content));
+    buildContent();
     m_window->addShortcut(NoModifier, key::Escape, [this] { finish(false); });
     // Return saves, as the highlighted button says.
     for (const uint32_t enter : {key::Return, key::KeypadEnter}) {
@@ -174,8 +169,32 @@ void SaveChangesDialog::ask(const std::vector<EditorPage *> &pages, std::functio
     m_window->setMinimumSize({380, 0});
     m_window->setMaximumSize({380, 16777215});
     m_window->setFitsContentHeight(true);
-    save->setFocus();
     m_window->show();
+}
+
+void SaveChangesDialog::buildContent()
+{
+    const std::string title = m_pages.size() == 1
+            ? format(tr("Save changes to \xE2\x80\x9C{name}\xE2\x80\x9D?"), {{"name", m_pages.front()->title()}})
+            : trn("Save changes to {n} document?", "Save changes to {n} documents?", m_pages.size());
+    m_window->setTitle(title);
+    auto content = std::make_unique<Content>(*this, title, m_pages);
+    DialogButton *save = content->saveButton();
+    m_window->setContentView(std::move(content));
+    save->setFocus();
+}
+
+void SaveChangesDialog::retranslate()
+{
+    // Hidden while the checked pages are saved, when the question is answered.
+    if (!m_window || m_window->isHidden())
+        return;
+    // A page closed meanwhile has no title to list; the question stays as it is.
+    for (const std::weak_ptr<bool> &lifetime : m_lifetimes) {
+        if (lifetime.expired())
+            return;
+    }
+    buildContent();
 }
 
 std::weak_ptr<bool> SaveChangesDialog::lifetimeOf(const EditorPage *page) const

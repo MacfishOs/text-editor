@@ -137,6 +137,9 @@ private:
     void showPage(int index);
     void attach(EditorPage *page);
     void updateTitle();
+    // The tabs keep their documents and text areas; everything around them
+    // takes the language of the moment.
+    void retranslate();
 
     EditorApplication &m_application;
     std::unique_ptr<cutefish::ui::Window> m_window;
@@ -160,6 +163,7 @@ private:
     std::unique_ptr<cutefish::ui::ConfirmDialog> m_statistics;
     std::unique_ptr<cutefish::ui::Toast> m_toast;
     std::vector<cutefish::base::Subscription> m_connections;
+    cutefish::base::Subscription m_languageChanged;
     std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
 };
 

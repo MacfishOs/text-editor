@@ -200,6 +200,25 @@ void EditorPage::applySettings()
     requestPaint();
 }
 
+void EditorPage::retranslate()
+{
+    if (m_contextMenu)
+        m_contextMenu->close();
+    m_contextMenu.reset();
+    takeChild(m_statusBar).reset();
+    m_statusBar = addChild<StatusBar>(*this);
+    m_infoBar->update();
+    if (m_findBar)
+        m_findBar->retranslate();
+    if (m_goToLine)
+        m_goToLine->refresh();
+    if (m_loading)
+        m_loading->retranslate();
+    if (m_reloadConfirm && m_reloadConfirm->window())
+        confirmReload(m_reloadEncoding);
+    requestLayout();
+}
+
 void EditorPage::focusEditor()
 {
     m_editor->setFocus();

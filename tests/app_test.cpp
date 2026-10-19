@@ -611,6 +611,54 @@ TEST_F(AppTest, QuitDialogSkipsPagesClosedMeanwhile)
     EXPECT_TRUE(m_app->isQuitting());
 }
 
+TEST_F(AppTest, LanguageChangeKeepsTheDocuments)
+{
+    const std::string path = writeFile("language.txt", "apple banana apple\ncherry apple\n");
+    EditorWindow *window = start({path});
+    ASSERT_TRUE(window);
+    EditorPage *page = window->currentPage();
+    Document &document = page->document();
+    document.insertText("edit ");
+    TestInput::typeKey(window->window(), key::letter('f'), ControlModifier);
+    TestInput::typeText(window->window(), "apple");
+    TestSupport::wait(80);
+    const std::string text = document.text();
+    const TextRange selection = document.selection();
+    EditorPage *untitled = window->newTab();
+    const std::string untitledTitle = untitled->title();
+    window->closeTab(0);
+    Window *dialog = openDialog(*m_app);
+    ASSERT_TRUE(dialog);
+    const View *question = dialog->contentView();
+    const StatusBar *status = &page->statusBar();
+    const EditorView *view = &page->editor();
+
+    cutefish::ui::Application::instance()->languageChanged.emit();
+    frame(window);
+    ASSERT_EQ(window->tabCount(), 2);
+    EXPECT_EQ(window->pages().front(), page);
+    EXPECT_EQ(window->currentPage(), untitled);
+    EXPECT_EQ(untitled->title(), untitledTitle);
+    EXPECT_EQ(&page->editor(), view);
+    EXPECT_NE(&page->statusBar(), status);
+    EXPECT_EQ(document.text(), text);
+    EXPECT_TRUE(document.isModified());
+    EXPECT_TRUE(document.canUndo());
+    EXPECT_EQ(document.selection(), selection);
+    ASSERT_TRUE(page->findBarIfMade());
+    EXPECT_TRUE(page->findBarIfMade()->isVisible());
+    EXPECT_EQ(document.searchText(), "apple");
+    // The question still waits for its answer, made again in its window.
+    EXPECT_EQ(openDialog(*m_app), dialog);
+    EXPECT_NE(dialog->contentView(), question);
+
+    TestInput::setKeyboardFocus(*dialog, true);
+    TestInput::typeKey(*dialog, key::Return);
+    TestSupport::wait(5);
+    EXPECT_EQ(window->tabCount(), 1);
+    EXPECT_EQ(readFile(path), text);
+}
+
 TEST_F(AppTest, FilesArriveAfterTheirTargetCloses)
 {
     const std::string late = writeFile("late.txt", "late\n");

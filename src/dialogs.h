@@ -28,6 +28,8 @@ public:
     void ask(const std::vector<EditorPage *> &pages, std::function<void()> then);
     bool isOpen() const { return m_window != nullptr; }
     cutefish::ui::Window *window() const { return m_window.get(); }
+    // The question in the language of the moment, its answers so far kept.
+    void retranslate();
 
     // Saves one page; `done(saved)` follows, at once or after a Save As.
     std::function<void(EditorPage *page, std::function<void(bool saved)> done)> onSaveRequested;
@@ -35,6 +37,7 @@ public:
 private:
     class Content;
 
+    void buildContent();
     void finish(bool proceed);
     void saveChecked();
     void release();

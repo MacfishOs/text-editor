@@ -115,6 +115,7 @@ public:
     // The search follows the field and the options.
     void update();
     void refresh();
+    void retranslate();
     bool replacing() const { return m_replacing; }
 
     double implicitHeight() const;
@@ -123,7 +124,8 @@ protected:
     void layout() override;
 
 private:
-    RoundButton *addToggle(const std::string &label, const std::string &tip);
+    RoundButton *addToggle(const std::string &label);
+    void setTexts();
     void setReplacing(bool replacing);
 
     EditorPage &m_page;
@@ -179,6 +181,7 @@ public:
     explicit LoadingView(EditorPage &page);
 
     void update();
+    void retranslate();
 
 protected:
     void layout() override;

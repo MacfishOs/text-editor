@@ -76,6 +76,9 @@ public:
     void popupContextMenu(cutefish::ui::PointF position);
     // Follows the preferences, the theme and the window's zoom.
     void applySettings();
+    // The bars and an open question take the language of the moment; the
+    // text and its view stay.
+    void retranslate();
     // Puts the cards in their corner and tells the view what they cover.
     void placeCards();
     // The card floating over the text, if one is open.

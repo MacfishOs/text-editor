@@ -426,34 +426,33 @@ FindBar::FindBar(EditorPage &page)
     };
 
     m_field->setName("findField");
-    m_field->setPlaceholder(tr("Find"));
     m_field->onTextEdited = [this] { update(); };
     m_field->onReturn = [this](bool shift) { find(shift); };
     m_field->onEscape = [this] { close(); };
 
     m_count->setFontSize(12);
-    m_caseToggle = addToggle("Aa", tr("Match Case"));
+    m_caseToggle = addToggle("Aa");
     m_caseToggle->onClicked = [this] {
         EditorSettings &settings = m_page.application().settings();
         settings.findCaseSensitive = !settings.findCaseSensitive;
         settings.commit();
         update();
     };
-    m_wordsToggle = addToggle("W", tr("Whole Words"));
+    m_wordsToggle = addToggle("W");
     m_wordsToggle->onClicked = [this] {
         EditorSettings &settings = m_page.application().settings();
         settings.findWholeWords = !settings.findWholeWords;
         settings.commit();
         update();
     };
-    m_regexToggle = addToggle(".*", tr("Regular Expression"));
+    m_regexToggle = addToggle(".*");
     m_regexToggle->onClicked = [this] {
         EditorSettings &settings = m_page.application().settings();
         settings.findRegex = !settings.findRegex;
         settings.commit();
         update();
     };
-    m_selectionToggle = addToggle("[ ]", tr("In Selection"));
+    m_selectionToggle = addToggle("[ ]");
     m_selectionToggle->onClicked = [this] {
         m_inSelection = !m_inSelection;
         update();
@@ -473,13 +472,12 @@ FindBar::FindBar(EditorPage &page)
 
     m_replaceField = addChild<CardField>();
     m_replaceField->setName("replaceField");
-    m_replaceField->setPlaceholder(tr("Replace with"));
     m_replaceField->onReturn = [this](bool) { m_page.document().replaceCurrent(m_replaceField->text()); };
     m_replaceField->onEscape = [this] { close(); };
-    m_replace = addChild<TextButton>(tr("Replace"));
+    m_replace = addChild<TextButton>();
     m_replace->setName("replaceButton");
     m_replace->onClicked = [this] { m_page.document().replaceCurrent(m_replaceField->text()); };
-    m_replaceAll = addChild<TextButton>(tr("Replace All"));
+    m_replaceAll = addChild<TextButton>();
     m_replaceAll->setName("replaceAllButton");
     m_replaceAll->onClicked = [this] {
         const int count = m_page.document().replaceAll(m_replaceField->text());
@@ -490,19 +488,37 @@ FindBar::FindBar(EditorPage &page)
     m_wrapped.setSingleShot(true);
     m_wrapped.setInterval(1200ms);
     m_wrapped.onTimeout = [this] { refresh(); };
+    setTexts();
     setReplacing(false);
 }
 
 FindBar::~FindBar() = default;
 
-RoundButton *FindBar::addToggle(const std::string &text, const std::string &tip)
+void FindBar::setTexts()
+{
+    m_field->setPlaceholder(tr("Find"));
+    m_caseToggle->setToolTip(tr("Match Case"));
+    m_wordsToggle->setToolTip(tr("Whole Words"));
+    m_regexToggle->setToolTip(tr("Regular Expression"));
+    m_selectionToggle->setToolTip(tr("In Selection"));
+    m_replaceField->setPlaceholder(tr("Replace with"));
+    m_replace->setText(tr("Replace"));
+    m_replaceAll->setText(tr("Replace All"));
+}
+
+void FindBar::retranslate()
+{
+    setTexts();
+    refresh();
+}
+
+RoundButton *FindBar::addToggle(const std::string &text)
 {
     // A two-state option inside the field, drawn as its own short label.
     RoundButton *toggle = addChild<RoundButton>(24);
     Label *label = toggle->setLabel(text, 0);
     label->setFontSize(11);
     label->setWeight(600);
-    toggle->setToolTip(tip);
     return toggle;
 }
 
@@ -788,6 +804,12 @@ void LoadingView::update()
     m_label->setText(format(tr("Opening \xE2\x80\x9C{name}\xE2\x80\x9D\xE2\x80\xA6"), {{"name", m_page.document().fileName()}}));
     m_progress->setValue(m_page.document().loadProgress());
     requestLayout();
+}
+
+void LoadingView::retranslate()
+{
+    m_cancel->setText(tr("Cancel"));
+    update();
 }
 
 void LoadingView::layout()
