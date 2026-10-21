@@ -7,9 +7,9 @@
 #include "base/dbus.h"
 #include "base/event_loop.h"
 #include "base/i18n.h"
+#include "base/locale.h"
 #include "ui/application.h"
 
-#include <clocale>
 #include <csignal>
 #include <cstdio>
 #include <filesystem>
@@ -104,7 +104,7 @@ int main(int argc, char **argv)
     app.setApplicationId("cutefish-text-editor");
 #endif
     cutefish::i18n::setDomain("cutefish-text-editor");
-    std::setlocale(LC_ALL, "");
+    cutefish::base::Locale::setProcessLocale();
 
     std::error_code error;
     const std::string workingDirectory = std::filesystem::current_path(error).string();
